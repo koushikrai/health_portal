@@ -16,6 +16,19 @@ app.use((0, cors_1.default)({
 }));
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));
+// Root endpoint
+app.get('/', (req, res) => {
+    res.json({
+        service: 'Expertise Medical Clearance Portal API',
+        status: 'online',
+        version: '1.0.0',
+        timestamp: new Date().toISOString(),
+        endpoints: {
+            health: '/health',
+            api: '/api'
+        }
+    });
+});
 // Health check
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', service: 'Expertise Medical Clearance Portal API', timestamp: new Date() });
