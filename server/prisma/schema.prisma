@@ -1,0 +1,257 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  HR
+  REQUESTER
+  CENTRAL
+  CLINIC
+  FINANCE
+  ADMIN
+}
+
+enum RequestStatus {
+  WAITING
+  SUBMITTED
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  REJECTED
+}
+
+enum ReportResult {
+  FIT
+  UNFIT
+  CONDITIONAL
+  ISSUED
+  PENDING
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SUBMITTED
+  CLEARED
+  REJECTED
+}
+
+model User {
+  id           String      @id @default(uuid())
+  username     String      @unique
+  passwordHash String
+  name         String
+  role         Role
+  vendorId     String?     // Assigned if role == CLINIC
+  vendor       Vendor?     @relation(fields: [vendorId], references: [id])
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  requests     MedicalRequest[] @relation("CreatedRequests")
+  auditLogs    AuditLog[]
+}
+
+model Department {
+  id          String   @id // e.g. "D001"
+  code        String   @unique // e.g. "CIVIL", "PMTA", "BD"
+  name        String
+  status      String   @default("Active")
+  cleanupNote String?
+}
+
+model DepartmentMapping {
+  id         String @id @default(uuid())
+  rawValue   String @unique // e.g. "BUISWENESS"
+  masterCode String // e.g. "BD"
+  action     String // "Renamed / merged" or "Kept as is"
+}
+
+model Vendor {
+  id              String      @id // "V1", "V2", "V3", "V4", "V5"
+  code            String      @unique // "BAK", "GAMC", "JMC", "ARZ", "DINA"
+  name            String
+  sapVendorNo     String?     // "1001502", "1001238"
+  crNumber        String?     // Commercial Registration
+  vatNumber       String?     // ZATCA VAT ID
+  tier            String?     @default("Tier 1 Primary")
+  saudization     Float?      @default(39.8)
+  status          String      @default("Contract 2026")
+  notes           String?
+  isActive        Boolean     @default(true)
+  contracts       Contract[]
+  slots           ClinicSlot[]
+  requests        MedicalRequest[]
+  reports         MedicalReport[]
+  invoices        Invoice[]
+  users           User[]
+}
+
+model Employee {
+  id             String      @id @default(uuid())
+  employeeNo     String      @unique // e.g. "11000008"
+  name           String
+  position       String?     // Position Desc.
+  division       String?     // Division Desc.
+  department     String?     // Department Desc.
+  jobDesc        String?     // Job Desc.
+  employeeGroup  String?     // Expat / Permanent / Saudi National
+  costCenter     String?     // 10-digit code
+  costCenterDesc String?
+  otEligible     Boolean     @default(false)
+  dailyWorkingHrs Float      @default(8.0)
+  status         String      @default("Active") // Active, On-Vacation
+  gender         String?     // MALE, FEMALE
+  nationality    String?     // SAUDI ARABIAN, INDIAN, etc.
+  iqamaId        String?     // 10-digit Muqeem / National ID
+  timeProfile    String?     // Biometric
+  workSchedule   String?     // Sun-Thu (07am to 17:30pm)
+  joiningDate    DateTime?
+  hourlyRate     Decimal?    @db.Decimal(10, 2)
+  photoUrl       String?
+  iqamaUrl       String?
+  passportUrl    String?
+  requests       MedicalRequest[]
+  reports        MedicalReport[]
+}
+
+model MedicalTest {
+  id             String      @id // SAP Material code e.g. "5004955"
+  name           String
+  testType       String      @default("Fitness test") // Fitness test / One-off service
+  validityMonths Int         @default(12) // 0 for one-offs
+  isVatInclusive Boolean     @default(false)
+  ratedClinics   String?     // "BAK, GAMC"
+  codeSource     String?     @default("SAP material")
+  notes          String?
+  requests       MedicalRequest[]
+  reports        MedicalReport[]
+  rates          ContractRate[]
+}
+
+model Contract {
+  id            String         @id @default(uuid())
+  vendorId      String
+  vendor        Vendor         @relation(fields: [vendorId], references: [id])
+  contractNo    String         // SAP Contract # (e.g. 4620000325)
+  quoteNo       String?        // Quote Ref. (e.g. QT25/11/040)
+  startDate     DateTime
+  endDate       DateTime
+  invoicingType String         // "Ariba portal", "E-invoice email"
+  paymentTerms  Int            @default(30) // Days
+  fileName      String?        // "BADR_ALKHALEEJ_AGREEMENT.pdf"
+  notes         String[]
+  rates         ContractRate[]
+  createdAt     DateTime       @default(now())
+}
+
+model ContractRate {
+  id          String      @id @default(uuid())
+  contractId  String
+  contract    Contract    @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  testId      String
+  test        MedicalTest @relation(fields: [testId], references: [id])
+  rate        Decimal     @db.Decimal(10, 2)
+  includesVat Boolean     @default(false)
+
+  @@unique([contractId, testId])
+}
+
+model ClinicSlot {
+  id            String      @id @default(uuid())
+  vendorId      String
+  vendor        Vendor      @relation(fields: [vendorId], references: [id])
+  totalCapacity Int
+  startDate     DateTime
+  endDate       DateTime
+  testId        String?
+  createdAt     DateTime    @default(now())
+  requests      MedicalRequest[]
+}
+
+model MedicalRequest {
+  id           String         @id // e.g. "MR-2026-0141"
+  employeeId   String
+  employee     Employee       @relation(fields: [employeeId], references: [id])
+  testId       String
+  test         MedicalTest    @relation(fields: [testId], references: [id])
+  vendorId     String?
+  vendor       Vendor?        @relation(fields: [vendorId], references: [id])
+  slotId       String?
+  slot         ClinicSlot?    @relation(fields: [slotId], references: [id])
+  department   String?
+  status       RequestStatus  @default(WAITING)
+  needByDate   DateTime?
+  apptDate     DateTime?
+  note         String?
+  createdById  String?
+  createdBy    User?          @relation("CreatedRequests", fields: [createdById], references: [id])
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  report       MedicalReport?
+  invoiceItems InvoiceLineItem[]
+}
+
+model MedicalReport {
+  id          String        @id // e.g. "REP-0081"
+  requestId   String        @unique
+  request     MedicalRequest @relation(fields: [requestId], references: [id])
+  employeeId  String
+  employee    Employee      @relation(fields: [employeeId], references: [id])
+  testId      String
+  test        MedicalTest   @relation(fields: [testId], references: [id])
+  vendorId    String
+  vendor      Vendor        @relation(fields: [vendorId], references: [id])
+  result      ReportResult  @default(FIT)
+  testDate    DateTime
+  validUntil  DateTime?
+  fileUrl     String?
+  remarks     String?
+  createdAt   DateTime      @default(now())
+}
+
+model Invoice {
+  id           String            @id // e.g. "INV-0031"
+  invoiceNo    String
+  vendorId     String
+  vendor       Vendor            @relation(fields: [vendorId], references: [id])
+  invoiceDate  DateTime
+  subtotal     Decimal           @db.Decimal(12, 2)
+  vatAmount    Decimal           @db.Decimal(12, 2)
+  totalAmount  Decimal           @db.Decimal(12, 2)
+  sesReference String?           // SAP Service Entry Sheet #
+  fileUrl      String?
+  status       InvoiceStatus     @default(SUBMITTED)
+  reviewNotes  String?
+  reviewedAt   DateTime?
+  reviewedById String?
+  createdAt    DateTime          @default(now())
+  lineItems    InvoiceLineItem[]
+}
+
+model InvoiceLineItem {
+  id             String         @id @default(uuid())
+  invoiceId      String
+  invoice        Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  requestId      String
+  request        MedicalRequest @relation(fields: [requestId], references: [id])
+  contractRate   Decimal        @db.Decimal(10, 2)
+  billedRate     Decimal        @db.Decimal(10, 2)
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  timestamp  DateTime @default(now())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  actorName  String
+  role       Role
+  action     String
+  entityType String
+  entityId   String?
+  details    String
+}

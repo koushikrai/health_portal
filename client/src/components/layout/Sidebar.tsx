@@ -1,0 +1,160 @@
+import React from 'react';
+
+export interface NavItem {
+  id: string;
+  label: string;
+  icon: string;
+  badge?: number | string;
+  allowedRoles?: string[];
+}
+
+interface SidebarProps {
+  currentTab: string;
+  onSelectTab: (tabId: string) => void;
+  userRole: string;
+  userName: string;
+  onSwitchRole: (role: string, vendorId?: string) => void;
+  onLogout: () => void;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({
+  currentTab,
+  onSelectTab,
+  userRole,
+  userName,
+  onSwitchRole,
+  onLogout
+}) => {
+  const navItems: NavItem[] = [
+    { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', allowedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'FINANCE', 'ADMIN'] },
+    { id: 'intake', label: 'New Request', icon: 'add_circle', allowedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'ADMIN'] },
+    { id: 'requests', label: 'Requests Queue', icon: 'assignment', badge: 'Active', allowedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'ADMIN'] },
+    { id: 'reports', label: 'Report Library', icon: 'folder_shared', allowedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'CLINIC', 'FINANCE', 'ADMIN'] },
+    { id: 'clinic', label: 'Clinic Portal', icon: 'local_hospital', allowedRoles: ['CLINIC', 'ADMIN'] },
+    { id: 'finance', label: 'Invoice Clearance', icon: 'receipt_long', allowedRoles: ['FINANCE', 'ADMIN'] },
+    { id: 'suppliers', label: 'Clinics & Contracts', icon: 'domain', allowedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'CLINIC', 'FINANCE', 'ADMIN'] },
+    { id: 'audit', label: 'System Audit Log', icon: 'history', allowedRoles: ['HR', 'CENTRAL', 'FINANCE', 'ADMIN'] },
+    { id: 'admin', label: 'Administration', icon: 'admin_panel_settings', badge: 'Master', allowedRoles: ['ADMIN'] },
+  ];
+
+  const visibleItems = navItems.filter(item => {
+    if (!item.allowedRoles) return true;
+    return item.allowedRoles.includes(userRole) || userRole === 'ADMIN';
+  });
+
+  return (
+    <aside className="w-64 bg-[#0A0F1D] text-white flex flex-col justify-between border-r border-slate-800 shrink-0 select-none min-h-screen">
+      <div>
+        {/* Brand Header */}
+        <div className="px-5 py-5 flex items-center justify-between border-b border-slate-800/60">
+          <div className="flex items-center gap-2">
+            <span className="font-display font-extrabold text-2xl tracking-tight text-white">expertise</span>
+            <span className="bg-secondary text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md tracking-wider">HEALTH</span>
+          </div>
+        </div>
+
+        {/* Active Facility Card */}
+        <div className="mx-3 mt-4 mb-3">
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 shadow-inner">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Operational Hub</span>
+              <span className="h-2 w-2 rounded-full bg-secondary shadow-sm shadow-secondary/60 animate-pulse"></span>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px] text-secondary">domain</span>
+                <span className="text-white text-xs font-semibold">ECC Jubail Operations</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/80 text-[11px]">
+              <span className="text-slate-400">Saudi Arabia</span>
+              <span className="px-1.5 py-0.5 rounded border border-emerald-500/30 text-emerald-400 text-[9.5px] font-semibold bg-emerald-950/40">
+                ACTIVE PORTAL
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Navigation Section */}
+        <div className="px-4 pt-3 pb-1">
+          <span className="text-[10px] uppercase text-slate-400 tracking-wider font-semibold">Medical Modules</span>
+        </div>
+
+        <nav className="px-3 space-y-1.5">
+          {visibleItems.map(item => {
+            const isActive = currentTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => onSelectTab(item.id)}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                  isActive
+                    ? 'bg-white text-slate-900 font-semibold shadow-sm'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className={`material-symbols-outlined text-[19px] ${isActive ? 'text-secondary' : 'text-slate-400'}`}>
+                    {item.icon}
+                  </span>
+                  <span>{item.label}</span>
+                </div>
+                {item.badge && (
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                    isActive ? 'bg-secondary/15 text-secondary' : 'bg-slate-800 text-slate-300'
+                  }`}>
+                    {item.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* Sidebar Footer: Active Role Switcher & Sign Out */}
+      <div className="p-3 border-t border-slate-800/60 bg-[#080C17]">
+        <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-2.5 mb-2">
+          <div className="flex items-center justify-between mb-1.5 text-[10px] text-slate-400 uppercase font-semibold">
+            <div className="flex items-center gap-1">
+              <span className="material-symbols-outlined text-[14px]">sync_alt</span>
+              <span>Fast Role Switcher</span>
+            </div>
+          </div>
+          <select
+            value={userRole}
+            onChange={(e) => onSwitchRole(e.target.value)}
+            className="w-full bg-[#0D121F] text-white text-xs font-semibold rounded-lg px-2.5 py-1.5 border border-slate-700/80 focus:outline-none focus:border-secondary cursor-pointer"
+          >
+            <option value="HR">HR Coordinator</option>
+            <option value="REQUESTER">HSE Coordinator</option>
+            <option value="CENTRAL">Central Medical Team</option>
+            <option value="CLINIC">Clinic Desk (GAMC / BAK)</option>
+            <option value="FINANCE">Finance Controller</option>
+            <option value="ADMIN">System Administrator</option>
+          </select>
+        </div>
+
+        {/* User Card with Sign Out */}
+        <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-slate-900/40 text-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="h-6 w-6 rounded-full bg-secondary text-white font-bold flex items-center justify-center text-[10px] shrink-0">
+              {userName ? userName[0].toUpperCase() : 'U'}
+            </div>
+            <div className="truncate text-left leading-tight">
+              <div className="text-slate-200 font-bold truncate text-[11px]">{userName}</div>
+              <div className="text-slate-400 text-[9.5px]">{userRole}</div>
+            </div>
+          </div>
+          <button
+            onClick={onLogout}
+            title="Sign out to Login Page"
+            className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-950/40 rounded transition-colors cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px]">logout</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+  );
+};
