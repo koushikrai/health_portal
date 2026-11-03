@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+
+<html lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_dashboard" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,300..900;1,300..900&amp;family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{colors:{"secondary-container":"#82f5c1","primary-container":"#0f766e","on-tertiary-fixed-variant":"#004b73","tertiary-fixed":"#cce5ff","on-primary-container":"#a3faef","outline-variant":"#bdc9c6","inverse-primary":"#80d5cb","on-surface-variant":"#3e4947","surface-container-low":"#eff4ff","secondary":"#006c4a","surface-bright":"#f8f9ff","surface-container-highest":"#d3e4fe","background":"#f8f9ff","on-secondary":"#ffffff","error-container":"#ffdad6","on-tertiary-container":"#dbecff","surface-dim":"#cbdbf5","tertiary-container":"#006fa8","on-secondary-container":"#00714e","on-background":"#0b1c30","surface-variant":"#d3e4fe","surface":"#f8f9ff","primary":"#005c55","on-primary-fixed":"#00201d","secondary-fixed-dim":"#68dba9","primary-fixed-dim":"#80d5cb","primary-fixed":"#9cf2e8","surface-container":"#e5eeff","error":"#ba1a1a","on-primary-fixed-variant":"#00504a","surface-container-high":"#dce9ff","on-tertiary":"#ffffff","surface-container-lowest":"#ffffff","on-error-container":"#93000a","on-surface":"#0b1c30","on-tertiary-fixed":"#001d31","secondary-fixed":"#85f8c4","inverse-surface":"#213145","on-error":"#ffffff","surface-tint":"#006a63","on-secondary-fixed-variant":"#005137","on-primary":"#ffffff","outline":"#6e7977","tertiary-fixed-dim":"#93ccff","inverse-on-surface":"#eaf1ff","on-secondary-fixed":"#002114","tertiary":"#005683"},borderRadius:{DEFAULT:"0.125rem",lg:"0.25rem",xl:"0.5rem",full:"0.75rem"},spacing:{"space-sm":"0.5rem","gutter-mobile":"0.5rem","space-xl":"2rem","space-lg":"1.25rem","margin-mobile":"0.75rem","space-md":"0.75rem",margin:"1.5rem",gutter:"1rem","space-xs":"0.25rem","gutter-tablet":"0.75rem"},fontFamily:{"body-lg":["Hanken Grotesk"],"headline-sm":["Hanken Grotesk"],"headline-lg":["Hanken Grotesk"],"label-md":["JetBrains Mono"],"label-lg":["JetBrains Mono"],"label-sm":["JetBrains Mono"],"headline-md":["Hanken Grotesk"],"body-sm":["Hanken Grotesk"],"headline-xl-mobile":["Hanken Grotesk"],"headline-xl":["Hanken Grotesk"],"body-md":["Hanken Grotesk"]},fontSize:{"body-lg":["1rem",{lineHeight:"1.5rem",fontWeight:"400"}],"headline-sm":["1.125rem",{lineHeight:"1.5rem",fontWeight:"600"}],"headline-lg":["1.5rem",{lineHeight:"2rem",letterSpacing:"-0.015em",fontWeight:"600"}],"label-md":["0.75rem",{lineHeight:"1rem",letterSpacing:"0.02em",fontWeight:"500"}],"label-lg":["0.875rem",{lineHeight:"1.25rem",letterSpacing:"-0.01em",fontWeight:"500"}],"label-sm":["0.6875rem",{lineHeight:"0.875rem",letterSpacing:"0.04em",fontWeight:"600"}],"headline-md":["1.25rem",{lineHeight:"1.75rem",letterSpacing:"-0.01em",fontWeight:"600"}],"body-sm":["0.75rem",{lineHeight:"1.125rem",fontWeight:"400"}],"headline-xl-mobile":["1.5rem",{lineHeight:"2rem",letterSpacing:"-0.01em",fontWeight:"700"}],"headline-xl":["2rem",{lineHeight:"2.5rem",letterSpacing:"-0.02em",fontWeight:"700"}],"body-md":["0.875rem",{lineHeight:"1.25rem",fontWeight:"400"}]}}}};</script></head><body class="bg-background font-body-md text-on-surface antialiased"><aside class="fixed left-0 top-0 h-full w-64 bg-surface-container-lowest shadow-[0_1px_8px_rgba(0,0,0,0.04)] z-50 flex flex-col justify-between"><div class="flex flex-col"><div class="h-16 px-space-md flex items-center gap-space-sm bg-surface-container-low"><div class="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-on-primary text-[20px]">local_hospital</span></div><div class="flex flex-col min-w-0"><span class="font-headline-sm text-headline-sm text-primary leading-tight truncate">Badr Al Khaleej</span><span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider truncate">Diagnostic &amp; Clinic</span></div></div><div class="px-space-md py-space-sm bg-surface-container-lowest"><div class="flex items-center gap-space-xs px-space-sm py-space-xs rounded bg-secondary-container text-on-secondary-container font-label-sm text-label-sm"><span class="material-symbols-outlined text-[14px]">verified</span><span class="tracking-wide uppercase font-semibold truncate">MOH / CCHI Accredited</span></div></div><div class="px-space-md pt-space-md pb-space-xs"><span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Clinical Navigation</span></div><nav class="flex flex-col gap-space-xs px-space-md" data-active-classes="bg-primary-container text-on-primary-container font-semibold rounded-lg shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><a class="group flex items-center justify-between px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all" data-path="corporate-inbound-requests" href="#"><div class="flex items-center gap-space-sm min-w-0"><span class="material-symbols-outlined text-[20px] text-outline group-hover:text-on-surface">move_to_inbox</span><span class="font-body-md text-body-md truncate">Inbound Requests</span></div><span class="px-space-xs py-0.5 rounded-full bg-error-container text-on-error-container font-label-sm text-label-sm font-bold">18</span></a><a class="group flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all" data-path="appointment-and-slot-scheduler" href="#"><span class="material-symbols-outlined text-[20px] text-outline group-hover:text-on-surface">calendar_month</span><span class="font-body-md text-body-md truncate">Slot Scheduler</span></a><a aria-current="page" class="group flex items-center gap-space-sm px-space-md py-space-sm transition-all bg-primary-container text-on-primary-container font-semibold rounded-lg shadow-[0_1px_8px_rgba(0,0,0,0.04)]" data-path="test-execution-and-lab-entry" href="#"><span class="material-symbols-outlined text-[20px] text-outline group-hover:text-on-surface">biotech</span><span class="font-body-md text-body-md truncate">Test &amp; Lab Entry</span></a><a class="group flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all" data-path="medical-card-issuance-and-sync" href="#"><span class="material-symbols-outlined text-[20px] text-outline group-hover:text-on-surface">badge</span><span class="font-body-md text-body-md truncate">Card Issuance &amp; Sync</span></a><a class="group flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all" data-path="enterprise-client-directory" href="#"><span class="material-symbols-outlined text-[20px] text-outline group-hover:text-on-surface">corporate_fare</span><span class="font-body-md text-body-md truncate">Enterprise Directory</span></a></nav></div><div class="p-space-md bg-surface-container-low"><div class="flex items-center gap-space-xs mb-space-xs"><span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span><span class="font-label-sm text-label-sm text-secondary font-semibold uppercase tracking-wider">Enterprise Sync Active</span></div><div class="flex flex-wrap gap-space-xs"><span class="px-1.5 py-0.5 rounded bg-surface-container-highest font-label-sm text-label-sm text-on-surface">Yanpet</span><span class="px-1.5 py-0.5 rounded bg-surface-container-highest font-label-sm text-label-sm text-on-surface">SABIC</span><span class="px-1.5 py-0.5 rounded bg-surface-container-highest font-label-sm text-label-sm text-on-surface">Sadara</span><span class="px-1.5 py-0.5 rounded bg-surface-container-highest font-label-sm text-label-sm text-on-surface">Maaden</span></div></div></aside><div class="pl-64"><header class="fixed top-0 left-64 right-0 h-16 bg-surface-container-lowest/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] z-40"><div class="w-full h-16 px-space-lg flex items-center justify-between"><div class="flex items-center gap-space-md"><div class="flex items-center gap-space-xs px-space-sm py-1.5 rounded-lg bg-surface-container-low text-on-surface"><span class="material-symbols-outlined text-[18px] text-secondary">cloud_done</span><span class="font-label-md text-label-md font-medium">Sync Status: All Company Portals Connected</span></div><div class="hidden xl:flex items-center gap-space-xs font-label-sm text-label-sm text-on-surface-variant"><span class="material-symbols-outlined text-[16px]">schedule</span><span>Live Gateway Latency: 18ms</span></div></div><div class="flex items-center gap-space-md"><div class="flex items-center gap-space-xs"><a class="flex items-center gap-space-xs px-space-md h-9 rounded-lg bg-primary-container text-on-primary-container font-headline-sm text-label-md hover:bg-primary transition-all shadow-[0_1px_8px_rgba(0,0,0,0.04)]" data-path="corporate-inbound-requests" href="#"><span class="material-symbols-outlined text-[18px]">assignment_returned</span><span>Incoming Corporate Queue</span></a><a class="flex items-center gap-space-xs px-space-md h-9 rounded-lg bg-surface-container text-on-surface font-headline-sm text-label-md hover:bg-surface-container-high transition-all" data-path="direct-walk-in-intake" href="#"><span class="material-symbols-outlined text-[18px] text-primary">how_to_reg</span><span>Direct Walk-in Intake</span></a></div><div class="h-6 w-px bg-outline-variant"></div><div class="flex items-center gap-space-sm pl-space-xs"><div class="flex flex-col text-right"><span class="font-headline-sm text-body-md text-on-surface leading-tight font-semibold">Dr. Farooq Al-Zahrani</span><span class="font-label-sm text-label-sm text-on-surface-variant">Medical Director &amp; Chief Pathologist</span></div><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></div></header><main class="w-full pt-16 bg-background px-space-lg pb-space-xl"><div class="flex flex-col w-full">
+<!-- Top Global Sync & Diagnostic Telemetry Ribbon -->
+<div class="mb-space-lg rounded-xl bg-surface-container-lowest p-space-md shadow-sm">
+<div class="flex flex-wrap items-center justify-between gap-space-md">
+<div class="flex items-center gap-space-md">
+<div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-container text-on-primary-container shadow-sm">
+<span class="material-symbols-outlined text-[24px]">sync_saved_locally</span>
+</div>
+<div>
+<div class="flex items-center gap-space-xs">
+<span class="font-headline-sm text-headline-sm text-on-surface">Live Occupational Health Gateway</span>
+<span class="inline-flex items-center gap-1 rounded bg-secondary-container px-2 py-0.5 font-label-sm text-label-sm text-on-secondary-container">
+<span class="h-2 w-2 rounded-full bg-secondary animate-pulse"></span>
+              2-WAY REST API ACTIVE
+            </span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+            Target Sync Endpoints: <span class="font-label-sm text-label-sm font-semibold text-primary">Yanpet Petrochemical (ERP-v9)</span>, <span class="font-label-sm text-label-sm text-on-surface">SABIC Global HR</span>, <span class="font-label-sm text-label-sm text-on-surface">Sadara GatePass Services</span>
+</p>
+</div>
+</div>
+<div class="flex flex-wrap items-center gap-space-sm font-label-md text-label-md">
+<div class="flex items-center gap-space-xs rounded-lg bg-surface-container-low px-space-md py-space-xs text-on-surface">
+<span class="material-symbols-outlined text-[18px] text-tertiary">hub</span>
+<span>Gateway: TLS 1.3 Certified</span>
+</div>
+<div class="flex items-center gap-space-xs rounded-lg bg-surface-container-low px-space-md py-space-xs text-on-surface">
+<span class="material-symbols-outlined text-[18px] text-secondary">verified_user</span>
+<span>MOH License: #KSA-CCHI-9921-A</span>
+</div>
+<button class="flex items-center gap-space-xs rounded-lg bg-surface-container px-space-md py-space-xs text-primary hover:bg-surface-container-high transition-all" type="button">
+<span class="material-symbols-outlined text-[18px]">terminal</span>
+<span>Audit Stream</span>
+</button>
+</div>
+</div>
+<!-- Live Executive Metrics Strip -->
+<div class="mt-space-md grid grid-cols-2 gap-space-sm sm:grid-cols-4">
+<div class="rounded-lg bg-surface-container-low p-space-md">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant">Today Executed</span>
+<span class="material-symbols-outlined text-[18px] text-primary">biotech</span>
+</div>
+<div class="mt-space-xs flex items-baseline gap-space-xs">
+<span class="font-headline-xl text-headline-xl text-on-surface font-bold">38</span>
+<span class="font-label-sm text-label-sm text-secondary font-semibold">92% throughput</span>
+</div>
+<div class="mt-space-xs h-1.5 w-full overflow-hidden rounded-full bg-surface-container-highest">
+<div class="h-full rounded-full bg-primary" style="width: 76%"></div>
+</div>
+</div>
+<div class="rounded-lg bg-surface-container-low p-space-md">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant">Pending Sign-Off</span>
+<span class="material-symbols-outlined text-[18px] text-tertiary">clinical_notes</span>
+</div>
+<div class="mt-space-xs flex items-baseline gap-space-xs">
+<span class="font-headline-xl text-headline-xl text-on-surface font-bold">7</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant font-medium">Batch REQ-2026</span>
+</div>
+<div class="mt-space-xs h-1.5 w-full overflow-hidden rounded-full bg-surface-container-highest">
+<div class="h-full rounded-full bg-tertiary" style="width: 44%"></div>
+</div>
+</div>
+<div class="rounded-lg bg-secondary-container/30 p-space-md">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm uppercase tracking-wider text-on-secondary-container">Cards Issued &amp; Synced</span>
+<span class="material-symbols-outlined text-[18px] text-secondary">credit_card</span>
+</div>
+<div class="mt-space-xs flex items-baseline gap-space-xs">
+<span class="font-headline-xl text-headline-xl text-on-secondary-container font-bold">31</span>
+<span class="font-label-sm text-label-sm text-secondary font-semibold">Live Yanpet Push</span>
+</div>
+<div class="mt-space-xs h-1.5 w-full overflow-hidden rounded-full bg-secondary-container">
+<div class="h-full rounded-full bg-secondary" style="width: 82%"></div>
+</div>
+</div>
+<div class="rounded-lg bg-error-container/40 p-space-md">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm uppercase tracking-wider text-on-error-container">Secondary Review Req.</span>
+<span class="material-symbols-outlined text-[18px] text-error">warning</span>
+</div>
+<div class="mt-space-xs flex items-baseline gap-space-xs">
+<span class="font-headline-xl text-headline-xl text-on-error-container font-bold">2</span>
+<span class="font-label-sm text-label-sm text-error font-semibold">Elevated ALT / Spiro</span>
+</div>
+<div class="mt-space-xs h-1.5 w-full overflow-hidden rounded-full bg-error-container">
+<div class="h-full rounded-full bg-error" style="width: 25%"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Interactive Candidate Roster Strip -->
+<div class="mb-space-lg rounded-xl bg-surface-container-lowest p-space-md shadow-sm">
+<div class="mb-space-sm flex flex-wrap items-center justify-between gap-space-sm">
+<div class="flex items-center gap-space-sm">
+<span class="rounded bg-surface-container-high px-2 py-0.5 font-label-sm text-label-sm font-semibold uppercase text-on-surface">Batch Queue</span>
+<span class="font-headline-sm text-headline-sm text-on-surface">Yanpet Petrochemical • REQ-2026-0104</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">(4 Candidates in Execution Cycle)</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<button class="flex items-center gap-1 rounded bg-surface-container px-2 py-1 font-label-sm text-label-sm text-on-surface hover:bg-surface-container-high" type="button">
+<span class="material-symbols-outlined text-[16px]">filter_list</span> Filter Fit State
+        </button>
+<button class="flex items-center gap-1 rounded bg-surface-container px-2 py-1 font-label-sm text-label-sm text-on-surface hover:bg-surface-container-high" type="button">
+<span class="material-symbols-outlined text-[16px]">refresh</span> Refresh Queue
+        </button>
+</div>
+</div>
+<!-- Candidate Cards Carousel Grid -->
+<div class="grid grid-cols-1 gap-space-sm md:grid-cols-4">
+<!-- Active Item: Suresh Rahman -->
+<div class="group relative cursor-pointer rounded-lg bg-surface-container-low p-space-sm shadow-sm transition-all border-l-4 border-l-primary">
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-on-primary font-headline-sm text-label-sm">SR</span>
+<div>
+<p class="font-headline-sm text-body-md text-on-surface leading-tight font-semibold">Suresh Rahman</p>
+<p class="font-label-sm text-label-sm text-on-surface-variant font-mono">#E10220 • Logistics</p>
+</div>
+</div>
+<span class="inline-flex items-center gap-1 rounded bg-primary-container px-1.5 py-0.5 font-label-sm text-label-sm text-on-primary-container font-semibold">
+            ACTIVE
+          </span>
+</div>
+<div class="mt-space-xs flex items-center justify-between font-label-sm text-label-sm text-on-surface-variant">
+<span>Stage: Lab Final Review</span>
+<span class="text-secondary font-semibold">5/5 Complete</span>
+</div>
+</div>
+<!-- Item 2: Bilal Siddiqui -->
+<div class="group relative cursor-pointer rounded-lg bg-surface-container-lowest p-space-sm hover:bg-surface-container-low transition-all">
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="flex h-7 w-7 items-center justify-center rounded-full bg-surface-container-high text-on-surface font-headline-sm text-label-sm">BS</span>
+<div>
+<p class="font-headline-sm text-body-md text-on-surface leading-tight">Bilal Siddiqui</p>
+<p class="font-label-sm text-label-sm text-on-surface-variant font-mono">#E10221 • Heavy Ops</p>
+</div>
+</div>
+<span class="rounded bg-surface-container px-1.5 py-0.5 font-label-sm text-label-sm text-on-surface-variant">
+            IN QUEUE
+          </span>
+</div>
+<div class="mt-space-xs flex items-center justify-between font-label-sm text-label-sm text-on-surface-variant">
+<span>Stage: Audiometry Pending</span>
+<span class="text-on-surface-variant">4/5 Recorded</span>
+</div>
+</div>
+<!-- Item 3: Suresh Al-Harbi (Expiring <=60d) -->
+<div class="group relative cursor-pointer rounded-lg bg-surface-container-lowest p-space-sm hover:bg-surface-container-low transition-all">
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="flex h-7 w-7 items-center justify-center rounded-full bg-surface-container-high text-on-surface font-headline-sm text-label-sm">SH</span>
+<div>
+<p class="font-headline-sm text-body-md text-on-surface leading-tight">Suresh Al-Harbi</p>
+<p class="font-label-sm text-label-sm text-on-surface-variant font-mono">#E10228 • Refinery Unit</p>
+</div>
+</div>
+<span class="rounded bg-error-container px-1.5 py-0.5 font-label-sm text-label-sm text-on-error-container font-semibold">
+            EXP ≤ 42d
+          </span>
+</div>
+<div class="mt-space-xs flex items-center justify-between font-label-sm text-label-sm text-on-surface-variant">
+<span>Stage: Blood Draw Pending</span>
+<span class="text-error font-medium">1/5 Recorded</span>
+</div>
+</div>
+<!-- Item 4: Sajid Pillai -->
+<div class="group relative cursor-pointer rounded-lg bg-surface-container-lowest p-space-sm hover:bg-surface-container-low transition-all">
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="flex h-7 w-7 items-center justify-center rounded-full bg-surface-container-high text-on-surface font-headline-sm text-label-sm">SP</span>
+<div>
+<p class="font-headline-sm text-body-md text-on-surface leading-tight">Sajid Pillai</p>
+<p class="font-label-sm text-label-sm text-on-surface-variant font-mono">#E10222 • Maintenance</p>
+</div>
+</div>
+<span class="rounded bg-surface-container px-1.5 py-0.5 font-label-sm text-label-sm text-on-surface-variant">
+            DRAFT
+          </span>
+</div>
+<div class="mt-space-xs flex items-center justify-between font-label-sm text-label-sm text-on-surface-variant">
+<span>Stage: Initial Vitals Done</span>
+<span class="text-on-surface-variant">2/5 Recorded</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Primary Main Split: Results Workspace (Left 7 Cols) + Medical Certification & Issuance Engine (Right 5 Cols) -->
+<div class="grid grid-cols-1 gap-space-lg lg:grid-cols-12">
+<!-- LEFT PANEL: Active Patient Profile + Clinical Test Matrix (7 Cols) -->
+<div class="flex flex-col gap-space-lg lg:col-span-7">
+<!-- Patient Identity & Enterprise Scope Hero Panel -->
+<div class="rounded-xl bg-surface-container-lowest p-space-md shadow-sm">
+<div class="flex flex-col gap-space-md sm:flex-row sm:items-center sm:justify-between">
+<div class="flex items-center gap-space-md">
+<div class="relative">
+<img class="h-16 w-16 rounded-xl object-cover shadow-sm" data-alt="High-resolution clinical ID headshot photograph of Suresh Rahman, a middle-aged South Asian male industrial logistics specialist wearing safe occupational gear under clean ambient daylight studio medical illumination, hyper-realistic, neutral expression, subtle corporate clinical backdrop." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDi3u0H4-ShsSz7RXQBCeQL-ROhfH9hDjJ3C_Z45zYSQeWwrbdaW7_WFYLvlw0uyuF9Pfugq5ervdUQYQ2K6EXJDiqkYntb6hDW9Ybqn8H6g2KjjUYrIkRFRPXsrT27D37vO_k6vDyi-6ClIrBJXppCcNkBOD-NCAXJuDaLUThv22dxzKlqhiuHMgrkrEcaRy4nleCjZ-U0YAZhJVXejCbdG5suJx9oOQnDXMVPthRI"/>
+<span class="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-secondary text-on-secondary" title="Biometrics Verified">
+<span class="material-symbols-outlined text-[13px]">fingerprint</span>
+</span>
+</div>
+<div>
+<div class="flex items-center gap-space-xs">
+<h2 class="font-headline-lg text-headline-lg text-on-surface font-bold">Suresh Rahman</h2>
+<span class="rounded bg-surface-container px-2 py-0.5 font-label-sm text-label-sm font-semibold uppercase text-primary">Male • 39 Yrs</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant">
+                National ID / Iqama: <span class="font-label-md text-label-md font-mono text-on-surface font-medium">2490184820</span> • Blood Group: <span class="font-label-md text-label-md font-bold text-on-surface">O+ POS</span>
+</p>
+<div class="mt-space-xs flex flex-wrap gap-space-xs font-label-sm text-label-sm">
+<span class="rounded bg-surface-container-high px-2 py-0.5 text-on-surface">Company: Yanpet Petrochem</span>
+<span class="rounded bg-surface-container-high px-2 py-0.5 text-on-surface">Dept: LOGISTICS • Fleet Heavy</span>
+<span class="rounded bg-tertiary-container px-2 py-0.5 text-on-tertiary-container font-medium">Protocol: Periodic Fitness &amp; Site Gate Entry</span>
+</div>
+</div>
+</div>
+<div class="flex flex-col items-start gap-1 rounded-lg bg-surface-container-low p-space-sm sm:items-end">
+<span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant">Batch Authorization</span>
+<span class="font-label-md text-label-md font-bold font-mono text-primary">YAN-2026-0104-R</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Specimen Collection: 08:30 AM Today</span>
+</div>
+</div>
+</div>
+<!-- Test Execution Tabs & Comprehensive Parameter Grids -->
+<div class="rounded-xl bg-surface-container-lowest p-space-md shadow-sm">
+<div class="mb-space-md flex flex-wrap items-center justify-between gap-space-sm">
+<div>
+<span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant">Clinical Diagnostics Entry</span>
+<h3 class="font-headline-md text-headline-md text-on-surface font-semibold">Standard Occupational Protocol Panel</h3>
+</div>
+<div class="flex items-center gap-space-xs">
+<span class="inline-flex items-center gap-1 rounded bg-secondary-container px-2 py-1 font-label-sm text-label-sm text-on-secondary-container font-semibold">
+<span class="material-symbols-outlined text-[14px]">done_all</span> All Lab Results Ingested
+            </span>
+<button class="flex items-center gap-1 rounded-lg bg-surface-container px-space-md py-1.5 font-label-sm text-label-sm text-on-surface hover:bg-surface-container-high" type="button">
+<span class="material-symbols-outlined text-[16px]">edit_note</span> Quick Edit
+            </button>
+</div>
+</div>
+<!-- Diagnostic Accordion / Parameter Sections -->
+<div class="space-y-space-md">
+<!-- 1. CBC & Blood Chemistry -->
+<div class="overflow-hidden rounded-lg bg-surface-container-low">
+<div class="flex items-center justify-between bg-surface-container px-space-md py-2.5">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[18px] text-primary">bloodtype</span>
+<span class="font-headline-sm text-body-md text-on-surface font-semibold">1. CBC &amp; Serum Chemistry (Roche Cobas 6000)</span>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Analyzed: 09:12 AST • Tech: M. Tariq</span>
+</div>
+<div class="p-space-md">
+<div class="overflow-x-auto">
+<table class="w-full text-left font-body-sm text-body-sm">
+<thead>
+<tr class="bg-surface-container-high/60 font-label-sm text-label-sm text-on-surface-variant uppercase">
+<th class="py-2 px-space-sm">Parameter</th>
+<th class="py-2 px-space-sm">Result Value</th>
+<th class="py-2 px-space-sm">Reference Range</th>
+<th class="py-2 px-space-sm">Diagnostic State</th>
+<th class="py-2 px-space-sm text-right">Trend</th>
+</tr>
+</thead>
+<tbody class="divide-y-0">
+<tr class="hover:bg-surface-container/50">
+<td class="py-2 px-space-sm font-semibold text-on-surface">Fasting Blood Glucose</td>
+<td class="py-2 px-space-sm font-label-md text-label-md font-mono text-on-surface font-medium">96 mg/dL</td>
+<td class="py-2 px-space-sm font-label-sm text-label-sm text-on-surface-variant font-mono">70 - 100 mg/dL</td>
+<td class="py-2 px-space-sm">
+<span class="inline-flex items-center gap-1 rounded bg-secondary-container px-2 py-0.5 font-label-sm text-label-sm text-on-secondary-container font-semibold">
+<span class="h-1.5 w-1.5 rounded-full bg-secondary"></span> NORMAL
+                        </span>
+</td>
+<td class="py-2 px-space-sm text-right text-secondary">
+<span class="material-symbols-outlined text-[16px]">trending_flat</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-container/50">
+<td class="py-2 px-space-sm font-semibold text-on-surface">Hemoglobin (Hb)</td>
+<td class="py-2 px-space-sm font-label-md text-label-md font-mono text-on-surface font-medium">15.4 g/dL</td>
+<td class="py-2 px-space-sm font-label-sm text-label-sm text-on-surface-variant font-mono">13.8 - 17.2 g/dL</td>
+<td class="py-2 px-space-sm">
+<span class="inline-flex items-center gap-1 rounded bg-secondary-container px-2 py-0.5 font-label-sm text-label-sm text-on-secondary-container font-semibold">
+<span class="h-1.5 w-1.5 rounded-full bg-secondary"></span> OPTIMAL
+                        </span>
+</td>
+<td class="py-2 px-space-sm text-right text-secondary">
+<span class="material-symbols-outlined text-[16px]">trending_up</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-container/50">
+<td class="py-2 px-space-sm font-semibold text-on-surface">Total Cholesterol</td>
+<td class="py-2 px-space-sm font-label-md text-label-md font-mono text-on-surface font-medium">188 mg/dL</td>
+<td class="py-2 px-space-sm font-label-sm text-label-sm text-on-surface-variant font-mono">&lt; 200 mg/dL</td>
+<td class="py-2 px-space-sm">
+<span class="inline-flex items-center gap-1 rounded bg-secondary-container px-2 py-0.5 font-label-sm text-label-sm text-on-secondary-container font-semibold">
+<span class="h-1.5 w-1.5 rounded-full bg-secondary"></span> NORMAL
+                        </span>
+</td>
+<td class="py-2 px-space-sm text-right text-on-surface-variant">
+<span class="material-symbols-outlined text-[16px]">trending_flat</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-container/50">
+<td class="py-2 px-space-sm font-semibold text-on-surface">ALT / SGPT (Liver Enzyme)</td>
+<td class="py-2 px-space-sm font-label-md text-label-md font-mono text-on-surface font-medium">32 U/L</td>
+<td class="py-2 px-space-sm font-label-sm text-label-sm text-on-surface-variant font-mono">7 - 56 U/L</td>
+<td class="py-2 px-space-sm">
+<span class="inline-flex items-center gap-1 rounded bg-secondary-container px-2 py-0.5 font-label-sm text-label-sm text-on-secondary-container font-semibold">
+<span class="h-1.5 w-1.5 rounded-full bg-secondary"></span> NORMAL
+                        </span>
+</td>
+<td class="py-2 px-space-sm text-right text-secondary">
+<span class="material-symbols-outlined text-[16px]">check</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<!-- 2. Spirometry & Audiometry -->
+<div class="overflow-hidden rounded-lg bg-surface-container-low">
+<div class="flex items-center justify-between bg-surface-container px-space-md py-2.5">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[18px] text-tertiary">air</span>
+<span class="font-headline-sm text-body-md text-on-surface font-semibold">2. Respiratory &amp; Audiometric Baseline</span>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant">NIOSH / OSHA Compliant</span>
+</div>
+<div class="p-space-md grid grid-cols-1 md:grid-cols-2 gap-space-md">
+<div class="rounded-lg bg-surface-container-lowest p-space-sm">
+<div class="flex items-center justify-between">
+<span class="font-headline-sm text-body-md text-on-surface font-semibold">Spirometry (PFT)</span>
+<span class="inline-flex items-center gap-1 rounded bg-secondary-container px-2 py-0.5 font-label-sm text-label-sm text-on-secondary-container font-semibold">
+                    FEV1/FVC: 98% Normal
+                  </span>
+</div>
+<p class="mt-1 font-body-sm text-body-sm text-on-surface-variant">FVC: 4.82L (102% pred) • FEV1: 3.94L (99% pred)</p>
+<div class="mt-space-xs flex items-center gap-2">
+<div class="h-2 flex-1 rounded-full bg-surface-container-high overflow-hidden">
+<div class="h-full bg-secondary" style="width: 98%"></div>
+</div>
+<span class="font-label-sm text-label-sm font-mono text-secondary font-bold">Grade A Quality</span>
+</div>
+</div>
+<div class="rounded-lg bg-surface-container-lowest p-space-sm">
+<div class="flex items-center justify-between">
+<span class="font-headline-sm text-body-md text-on-surface font-semibold">Audiogram Threshold</span>
+<span class="inline-flex items-center gap-1 rounded bg-secondary-container px-2 py-0.5 font-label-sm text-label-sm text-on-secondary-container font-semibold">
+                    Pass Grade A
+                  </span>
+</div>
+<p class="mt-1 font-body-sm text-body-sm text-on-surface-variant">500Hz - 8000Hz Bilateral ≤ 15dB loss</p>
+<div class="mt-space-xs flex items-center justify-between font-label-sm text-label-sm text-on-surface-variant">
+<span>Standard Threshold Shift (STS): None</span>
+<span class="font-mono text-primary font-semibold">Clear for High Noise Zones</span>
+</div>
+</div>
+</div>
+</div>
+<!-- 3. Vision, Drug & Alcohol Screen, Radiologist Chest X-Ray -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-space-sm">
+<!-- Vision -->
+<div class="rounded-lg bg-surface-container-low p-space-sm">
+<div class="flex items-center gap-1 text-primary mb-1">
+<span class="material-symbols-outlined text-[18px]">visibility</span>
+<span class="font-headline-sm text-body-sm text-on-surface font-semibold">Vision &amp; Ishihara</span>
+</div>
+<p class="font-label-md text-label-md font-mono font-bold text-on-surface">20/20 Snellen (Bilateral)</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Ishihara 14-Plate: 14/14 Cleared</p>
+<span class="mt-2 inline-block rounded bg-surface-container px-2 py-0.5 font-label-sm text-label-sm text-secondary font-semibold">
+                Heavy Fleet Authorized
+              </span>
+</div>
+<!-- Drug Screen -->
+<div class="rounded-lg bg-surface-container-low p-space-sm">
+<div class="flex items-center gap-1 text-secondary mb-1">
+<span class="material-symbols-outlined text-[18px]">science</span>
+<span class="font-headline-sm text-body-sm text-on-surface font-semibold">Drug &amp; Alcohol Chain</span>
+</div>
+<p class="font-label-md text-label-md font-mono font-bold text-secondary">10-Panel Rapid: NEGATIVE</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Breath Alcohol: 0.000% BAC</p>
+<span class="mt-2 inline-block rounded bg-secondary-container px-2 py-0.5 font-label-sm text-label-sm text-on-secondary-container font-semibold">
+                SAMHSA Compliant
+              </span>
+</div>
+<!-- Chest X-Ray -->
+<div class="rounded-lg bg-surface-container-low p-space-sm">
+<div class="flex items-center gap-1 text-tertiary mb-1">
+<span class="material-symbols-outlined text-[18px]">radiology</span>
+<span class="font-headline-sm text-body-sm text-on-surface font-semibold">Chest X-Ray PA View</span>
+</div>
+<p class="font-label-md text-label-md font-mono font-bold text-on-surface">Normal Findings</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">No active lesions or cardiomegaly</p>
+<span class="mt-2 inline-block rounded bg-surface-container px-2 py-0.5 font-label-sm text-label-sm text-on-surface font-semibold">
+                Rad: Dr. Tariq Mansoor
+              </span>
+</div>
+</div>
+<!-- Clinical Observational Notes -->
+<div class="rounded-lg bg-surface-container-low p-space-md">
+<label class="block font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant mb-1">
+              Physician Clearance Annotations (Transmitted to Yanpet Occupational Health Log)
+            </label>
+<div class="rounded bg-surface-container-lowest p-space-sm font-body-sm text-body-sm text-on-surface">
+              Candidate exhibits excellent cardiovascular and pulmonary status. Blood pressure: 118/76 mmHg. Resting pulse: 68 bpm. Passed all physical exertion criteria for petrochemical terminal logistics and night-shift transport duty without limitation.
+            </div>
+</div>
+</div>
+</div>
+</div>
+<!-- RIGHT PANEL: Medical Card Validity & Certification Engine (5 Cols) -->
+<div class="flex flex-col gap-space-lg lg:col-span-5">
+<!-- Primary Issuance Engine Card -->
+<div class="rounded-xl bg-surface-container-lowest p-space-md shadow-sm">
+<div class="mb-space-md flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[24px] text-primary">verified</span>
+<div>
+<h3 class="font-headline-sm text-headline-sm text-on-surface font-bold">Certification &amp; Card Issuance</h3>
+<p class="font-label-sm text-label-sm text-on-surface-variant">Direct Gate-Pass Synchronization Module</p>
+</div>
+</div>
+<span class="rounded bg-surface-container-high px-2 py-1 font-label-sm text-label-sm font-mono text-primary font-bold">
+            STAGE 4 / 4
+          </span>
+</div>
+<!-- 1. Clinical Fitness Outcome Selector -->
+<div class="mb-space-md">
+<label class="block font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant mb-2">
+            1. Official Fitness Determination
+          </label>
+<div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+<label class="relative flex cursor-pointer flex-col rounded-lg bg-secondary-container/40 p-2.5 transition-all ring-2 ring-secondary">
+<input checked="" class="sr-only" name="fitness_status" type="radio" value="FIT"/>
+<div class="flex items-center justify-between">
+<span class="font-headline-sm text-body-md text-on-secondary-container font-bold">Fit for Duty</span>
+<span class="material-symbols-outlined text-[18px] text-secondary">check_circle</span>
+</div>
+<span class="font-label-sm text-label-sm text-on-secondary-container mt-1">Unrestricted clearance</span>
+</label>
+<label class="relative flex cursor-pointer flex-col rounded-lg bg-surface-container-low p-2.5 transition-all hover:bg-surface-container">
+<input class="sr-only" name="fitness_status" type="radio" value="RESTRICTED"/>
+<div class="flex items-center justify-between">
+<span class="font-headline-sm text-body-md text-on-surface font-semibold">Conditional</span>
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant">report</span>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant mt-1">Duty restrictions</span>
+</label>
+<label class="relative flex cursor-pointer flex-col rounded-lg bg-surface-container-low p-2.5 transition-all hover:bg-surface-container">
+<input class="sr-only" name="fitness_status" type="radio" value="UNFIT"/>
+<div class="flex items-center justify-between">
+<span class="font-headline-sm text-body-md text-on-surface font-semibold">Temporarily Unfit</span>
+<span class="material-symbols-outlined text-[18px] text-error">cancel</span>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant mt-1">Hold for re-test</span>
+</label>
+</div>
+</div>
+<!-- 2. Card Validity Period Selector -->
+<div class="mb-space-md">
+<div class="mb-2 flex items-center justify-between">
+<label class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant">
+              2. Certificate &amp; Gate-Pass Validity
+            </label>
+<span class="font-label-sm text-label-sm font-mono text-primary font-bold">Calculated Expiry: 03 Nov 2027</span>
+</div>
+<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+<button class="rounded bg-surface-container-low px-2 py-2 text-center font-label-md text-label-md text-on-surface hover:bg-surface-container" type="button">
+              1 Year (Std)
+            </button>
+<button class="rounded bg-primary-container px-2 py-2 text-center font-label-md text-label-md text-on-primary-container font-semibold shadow-sm" type="button">
+              2 Years (Petro)
+            </button>
+<button class="rounded bg-surface-container-low px-2 py-2 text-center font-label-md text-label-md text-on-surface hover:bg-surface-container" type="button">
+              6 Mo (Cond)
+            </button>
+<button class="rounded bg-surface-container-low px-2 py-2 text-center font-label-md text-label-md text-on-surface hover:bg-surface-container" type="button">
+              Custom Date
+            </button>
+</div>
+<div class="mt-2 flex items-center justify-between rounded bg-surface-container-low p-2 font-label-sm text-label-sm">
+<span class="text-on-surface-variant">Effective Start: <strong class="text-on-surface">Today (03 Nov 2025)</strong></span>
+<span class="font-mono text-secondary font-bold">Term: 730 Days Continuous</span>
+</div>
+</div>
+<!-- 3. Target Regulatory Cards & Gate Authorizations -->
+<div class="mb-space-md">
+<label class="block font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant mb-2">
+            3. Target Cards to Issue &amp; Synchronize
+          </label>
+<div class="space-y-2">
+<label class="flex items-center justify-between rounded-lg bg-surface-container-low p-2.5 cursor-pointer hover:bg-surface-container transition-all">
+<div class="flex items-center gap-space-sm">
+<input checked="" class="h-4 w-4 rounded accent-primary text-white" type="checkbox"/>
+<div>
+<p class="font-headline-sm text-body-md text-on-surface font-semibold">Iqama Occupational Fitness Card</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant">CCHI &amp; MOH Official Labor Registration</p>
+</div>
+</div>
+<span class="font-label-sm text-label-sm font-mono text-secondary font-bold">READY</span>
+</label>
+<label class="flex items-center justify-between rounded-lg bg-surface-container-low p-2.5 cursor-pointer hover:bg-surface-container transition-all">
+<div class="flex items-center gap-space-sm">
+<input checked="" class="h-4 w-4 rounded accent-primary text-white" type="checkbox"/>
+<div>
+<p class="font-headline-sm text-body-md text-on-surface font-semibold">Yanpet Site Gate Pass Card (RFID Sync)</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Access control turnstiles Zone 1 through Zone 4</p>
+</div>
+</div>
+<span class="font-label-sm text-label-sm font-mono text-secondary font-bold">PUSH ACTIVE</span>
+</label>
+<label class="flex items-center justify-between rounded-lg bg-surface-container-low p-2.5 cursor-pointer hover:bg-surface-container transition-all">
+<div class="flex items-center gap-space-sm">
+<input checked="" class="h-4 w-4 rounded accent-primary text-white" type="checkbox"/>
+<div>
+<p class="font-headline-sm text-body-md text-on-surface font-semibold">Heavy Vehicle Driving Fitness Endorsement</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant">DOT Equivalent Commercial Logistics certification</p>
+</div>
+</div>
+<span class="font-label-sm text-label-sm font-mono text-secondary font-bold">QUALIFIED</span>
+</label>
+<label class="flex items-center justify-between rounded-lg bg-surface-container-low p-2.5 cursor-pointer hover:bg-surface-container transition-all">
+<div class="flex items-center gap-space-sm">
+<input class="h-4 w-4 rounded accent-primary text-white" type="checkbox"/>
+<div>
+<p class="font-headline-sm text-body-md text-on-surface font-semibold">SABIC Multi-Facility Reciprocal Access</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Affiliate refinery cross-entry protocol</p>
+</div>
+</div>
+<span class="font-label-sm text-label-sm font-mono text-on-surface-variant">OPTIONAL</span>
+</label>
+</div>
+</div>
+<!-- 4. Physician Digital Signature & Cryptographic Seal -->
+<div class="mb-space-md rounded-lg bg-surface-container-low p-space-sm">
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-space-sm">
+<div class="flex h-10 w-10 items-center justify-center rounded-full bg-primary-container text-on-primary-container">
+<span class="material-symbols-outlined text-[20px]">draw</span>
+</div>
+<div>
+<p class="font-headline-sm text-body-md text-on-surface font-bold">Dr. Farooq Al-Zahrani, MD</p>
+<p class="font-label-sm text-label-sm text-on-surface-variant">MOH License #MD-48190 • Chief Medical Officer</p>
+</div>
+</div>
+<span class="inline-flex items-center gap-1 rounded bg-secondary-container px-2 py-0.5 font-label-sm text-label-sm text-on-secondary-container font-semibold">
+<span class="material-symbols-outlined text-[13px]">lock</span> PKI SIGNED
+            </span>
+</div>
+<div class="mt-space-xs rounded bg-surface-container-lowest p-2 font-label-sm text-label-sm font-mono text-on-surface-variant">
+            SHA256: 8a4f91e92d88c2...fa791c [Timestamp: 2026-03-31T09:41:22+03:00]
+          </div>
+</div>
+<!-- 5. Master Dispatch & Issuance Trigger Button -->
+<div class="space-y-space-xs">
+<button class="w-full flex flex-col items-center justify-center rounded-xl bg-primary-container py-space-md px-space-lg text-on-primary-container hover:bg-primary shadow-md transition-all group" id="issueCardBtn" onclick="handleCardIssuance()" type="button">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[22px] group-hover:scale-110 transition-transform">send_and_archive</span>
+<span class="font-headline-sm text-headline-sm font-bold tracking-tight">Approve &amp; Issue Medical Card</span>
+</div>
+<span class="font-label-sm text-label-sm text-on-primary-container/90 mt-0.5">
+              Instantly pushes clearance to Yanpet Master • Activates site gate badge
+            </span>
+</button>
+<p class="text-center font-label-sm text-label-sm text-on-surface-variant">
+            Legally binding under KSA Labor Regulations and Yanpet Safety Standard OHS-04.
+          </p>
+</div>
+</div>
+<!-- Live Transmission Receipt & Digital Passport Visual Preview -->
+<div class="rounded-xl bg-surface-container-lowest p-space-md shadow-sm">
+<div class="mb-space-sm flex items-center justify-between">
+<span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant">Digital Health Passport Preview</span>
+<span class="font-label-sm text-label-sm text-secondary font-mono font-semibold">NFC / QR Sync Ready</span>
+</div>
+<!-- Stylized Digital Medical Badge Preview Card -->
+<div class="relative overflow-hidden rounded-xl bg-surface-container p-space-md shadow-sm">
+<div class="absolute -right-12 -top-12 h-36 w-36 rounded-full bg-secondary-container/40 blur-2xl"></div>
+<div class="relative z-10 flex items-start justify-between">
+<div>
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px] text-primary">local_hospital</span>
+<span class="font-label-sm text-label-sm uppercase tracking-widest text-primary font-bold">Badr Al Khaleej Diagnostic</span>
+</div>
+<h4 class="font-headline-md text-headline-md text-on-surface font-bold mt-1">YANPET GATE-PASS CLEARANCE</h4>
+<p class="font-label-sm text-label-sm text-on-surface-variant">Petrochemical Facility Operational ID</p>
+</div>
+<!-- Dynamic QR Code Container -->
+<div class="flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-lg bg-surface-container-lowest p-1 shadow-sm">
+<svg class="h-full w-full text-on-surface" fill="currentColor" viewbox="0 0 24 24">
+<path d="M2 2h8v8H2V2zm2 2v4h4V4H4zm10-2h8v8h-8V2zm2 2v4h4V4h-4zM2 14h8v8H2v-8zm2 2v4h4v-4H4zm14-2h4v2h-4v-2zm-4 0h2v4h-2v-4zm2 4h2v4h-2v-4zm2 2h4v2h-4v-2zm-6 2h2v2h-2v-2zm0-8h2v2h-2v-2z"></path>
+</svg>
+</div>
+</div>
+<div class="relative z-10 mt-space-md grid grid-cols-2 gap-space-sm font-label-sm text-label-sm">
+<div>
+<span class="text-on-surface-variant uppercase">Worker Name:</span>
+<p class="font-headline-sm text-body-md text-on-surface font-semibold">Suresh Rahman</p>
+</div>
+<div>
+<span class="text-on-surface-variant uppercase">Yanpet Badge ID:</span>
+<p class="font-mono text-body-md text-on-surface font-bold">YP-LOG-10220</p>
+</div>
+<div>
+<span class="text-on-surface-variant uppercase">Fitness Class:</span>
+<p class="font-bold text-secondary">UNRESTRICTED (HEAVY OPS)</p>
+</div>
+<div>
+<span class="text-on-surface-variant uppercase">Expiry Stamp:</span>
+<p class="font-mono font-bold text-primary">03 NOV 2027</p>
+</div>
+</div>
+<div class="relative z-10 mt-space-md flex items-center justify-between rounded bg-surface-container-lowest/80 px-space-sm py-1.5 backdrop-blur font-label-sm text-label-sm">
+<span class="flex items-center gap-1 text-on-surface">
+<span class="material-symbols-outlined text-[14px] text-secondary">check_circle</span>
+              Auto-Sync: Ready to push
+            </span>
+<span class="font-mono text-on-surface-variant">Gate Access: Unlocked</span>
+</div>
+</div>
+<!-- Audit Trail Strip -->
+<div class="mt-space-md space-y-space-xs font-label-sm text-label-sm">
+<div class="flex items-center justify-between text-on-surface-variant">
+<span>Enterprise Gateway Handshake:</span>
+<span class="font-mono text-on-surface">200 OK (Yanpet ERP)</span>
+</div>
+<div class="flex items-center justify-between text-on-surface-variant">
+<span>CCHI Insurance Approval Code:</span>
+<span class="font-mono text-on-surface">CCHI-2026-991204</span>
+</div>
+<div class="flex items-center justify-between text-on-surface-variant">
+<span>Turnstile Firmware Relay:</span>
+<span class="font-mono text-secondary font-semibold">Synchronized (18ms)</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Interactive Feedback Toast / State Script -->
+<script>
+    function handleCardIssuance() {
+      const btn = document.getElementById('issueCardBtn');
+      if (!btn) return;
+      
+      const originalHTML = btn.innerHTML;
+      btn.disabled = true;
+      btn.classList.add('opacity-90', 'cursor-wait');
+      btn.innerHTML = `
+        <div class="flex items-center gap-space-xs text-on-primary-container">
+          <span class="material-symbols-outlined text-[20px] animate-spin">progress_activity</span>
+          <span class="font-headline-sm text-headline-sm font-bold">Synchronizing with Yanpet GatePass API...</span>
+        </div>
+        <span class="font-label-sm text-label-sm text-on-primary-container/80 mt-0.5">Encrypting digital clearance & transmitting RFID credentials</span>
+      `;
+
+      setTimeout(() => {
+        btn.classList.remove('bg-primary-container', 'hover:bg-primary');
+        btn.classList.add('bg-secondary', 'text-on-secondary');
+        btn.innerHTML = `
+          <div class="flex items-center gap-space-xs">
+            <span class="material-symbols-outlined text-[22px]">check_circle</span>
+            <span class="font-headline-sm text-headline-sm font-bold">Medical Card Issued & Successfully Synced</span>
+          </div>
+          <span class="font-label-sm text-label-sm text-on-secondary/90 mt-0.5">Yanpet Master #E10220 updated &bull; Site gate pass activated &bull; Receipt #TX-9941</span>
+        `;
+      }, 1400);
+    }
+  </script>
+</div></main></div></body></html>
