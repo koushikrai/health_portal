@@ -4,7 +4,11 @@ import { StatCard } from '../components/ui/StatCard';
 import { CertificateModal } from '../components/certificate/CertificateModal';
 import { api } from '../api/client';
 
-export const DashboardView: React.FC = () => {
+interface DashboardViewProps {
+  onNavigateToTab?: (tab: string) => void;
+}
+
+export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateToTab }) => {
   const [metrics, setMetrics] = useState<any>(null);
   const [recentReports, setRecentReports] = useState<any[]>([]);
   const [selectedCertificate, setSelectedCertificate] = useState<any>(null);
@@ -24,7 +28,7 @@ export const DashboardView: React.FC = () => {
       ]);
       setMetrics(metricsRes.data);
       if (reportsRes.data?.reports) {
-        setRecentReports(reportsRes.data.reports.slice(0, 5));
+        setRecentReports(reportsRes.data.reports.slice(0, 8));
       }
     } catch (e) {
       console.error('Failed to load dashboard metrics', e);
@@ -48,10 +52,10 @@ export const DashboardView: React.FC = () => {
   const clinicWorkload = metrics?.clinicWorkload || [];
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Operations Hero Banner */}
+    <div className="p-4 lg:p-6 max-w-7xl mx-auto space-y-6">
+      {/* 1. Operations Executive Hero Banner */}
       <HeroBanner
-        title="ECC Workforce Medical Clearance &"
+        title="Workforce Medical Clearance &"
         accentText="Gate Pass Governance"
         subtitle="Operational telemetry covering 1,200+ ECC active personnel across Jubail, Yanbu, and Eastern Province client complexes (Sadara, SABIC, Aramco)."
         timePeriod={timePeriod}
@@ -63,8 +67,58 @@ export const DashboardView: React.FC = () => {
         }}
       />
 
-      {/* 4 KPI Metric Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+      {/* 2. Operations Quick Hub & Telemetry Bar */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <span className="material-symbols-outlined text-[22px]">domain_verification</span>
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-display font-bold text-sm text-slate-900">
+                Enterprise Occupational Health Command Hub
+              </span>
+              <span className="inline-flex items-center gap-1 rounded bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10.5px] font-bold">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                ACTIVE MONITORING
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Live clearance status across 5 accredited partner medical centers and petrochemical gate passes.
+            </p>
+          </div>
+        </div>
+
+        {/* Action Shortcuts */}
+        {onNavigateToTab && (
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              onClick={() => onNavigateToTab('clinic')}
+              className="px-3.5 py-2 rounded-xl bg-primary hover:bg-slate-900 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[17px]">local_hospital</span>
+              <span>Open Clinic Portal (Client Spec)</span>
+            </button>
+            <button
+              onClick={() => onNavigateToTab('intake')}
+              className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[17px] text-secondary">add_circle</span>
+              <span>New Request</span>
+            </button>
+            <button
+              onClick={() => onNavigateToTab('requests')}
+              className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[17px]">assignment</span>
+              <span>Requests Queue</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 3. 4 Executive KPI StatCards (Real-Time from PostgreSQL) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-5">
         <StatCard
           label="ACTIVE ECC WORKFORCE"
           value={kpis?.activeWorkforce?.value ? `${kpis.activeWorkforce.value.toLocaleString()} workers` : '1,104 workers'}
@@ -88,234 +142,213 @@ export const DashboardView: React.FC = () => {
         <StatCard
           label="IN-FLIGHT CLEARANCES"
           value={kpis?.inFlightRequests?.value || '4 In-Flight'}
-          trendText={`${metrics?.requestsSummary?.waiting || 2} awaiting clinic assignment`}
+          trendText={`${metrics?.requestsSummary?.waiting || 2} awaiting clinic triage`}
           isPositiveTrend={false}
           icon="pending_actions"
           ceilingPercent={kpis?.inFlightRequests?.ceilingPercent || 25}
-          targetText={kpis?.inFlightRequests?.targetText || 'Central Team Triage Active'}
+          targetText={kpis?.inFlightRequests?.targetText || 'Active Triage in Progress'}
         />
 
         <StatCard
           label="RENEWALS REQUIRED (<30D)"
           value={kpis?.expiringRenewals?.value || '14 Expiring'}
-          trendText={kpis?.expiringRenewals?.warningText || '14 certificates <30 days'}
+          trendText={kpis?.expiringRenewals?.trend || 'Automated reminders sent'}
           isPositiveTrend={false}
-          icon="alarm"
-          ceilingPercent={92}
-          targetText="Target Compliance: 98%"
+          icon="notifications_active"
+          ceilingPercent={kpis?.expiringRenewals?.ceilingPercent || 12}
+          targetText={kpis?.expiringRenewals?.targetText || 'Immediate Action Required'}
         />
       </div>
 
-      {/* 2-Column Analytics Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Industrial Client Clearance Distribution (2 cols wide) */}
-        <div className="lg:col-span-2 bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+      {/* 4. Macro Analytical Breakdown Grids */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* Client Complex Volume Breakdown */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-sm flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-display font-bold text-base text-slate-900">
-                  Client Industrial Site Deployment & Clearance
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[20px] text-primary">domain</span>
+                <h3 className="font-display font-extrabold text-sm text-slate-900">
+                  Client Complex Volume
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Contractual medical compliance parity across major oil, gas, and petrochemical facilities
-                </p>
               </div>
-              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-                Site Compliant
+              <span className="text-[10px] font-bold uppercase text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                Active Contracts
               </span>
             </div>
-
-            <div className="space-y-4 pt-2">
+            <div className="mt-4 space-y-3.5">
               {clientVolume.map((item: any) => (
-                <div key={item.code} className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-semibold">
-                    <span className="text-slate-800">{item.client}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-500 font-normal">{item.count} / {item.target} cleared</span>
-                      <span className={`font-mono font-bold ${item.percent >= 90 ? 'text-emerald-600' : 'text-secondary'}`}>
-                        {item.percent}%
-                      </span>
-                    </div>
+                <div key={item.client}>
+                  <div className="flex items-center justify-between text-xs font-semibold mb-1">
+                    <span className="text-slate-700">{item.client}</span>
+                    <span className="text-slate-900 font-bold">{item.count} passes ({item.percent}%)</span>
                   </div>
-                  <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        item.percent >= 90 ? 'bg-secondary' : 'bg-orange-400'
-                      }`}
+                      className="h-full bg-secondary rounded-full"
                       style={{ width: `${item.percent}%` }}
-                    ></div>
+                    />
                   </div>
                 </div>
               ))}
             </div>
           </div>
-
-          <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-            <span>Overall Site Access Parity: <strong className="text-slate-800 font-mono">92.4%</strong></span>
-            <span className="text-slate-400">Audited per Saudi Aramco & SABIC EHS Specs</span>
+          <div className="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-400 flex items-center justify-between">
+            <span>Aggregated gate clearance passes</span>
+            <span className="font-bold text-slate-700">100% CCHI Verified</span>
           </div>
         </div>
 
-        {/* Right Column: Department Medical Readiness (1 col wide) */}
-        <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+        {/* Department Compliance Rates */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-sm flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-display font-bold text-base text-slate-900">Department Readiness</h3>
-                <p className="text-xs text-slate-500 mt-0.5">Active personnel clearance status</p>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[20px] text-secondary">fact_check</span>
+                <h3 className="font-display font-extrabold text-sm text-slate-900">
+                  Department Compliance
+                </h3>
               </div>
+              <span className="text-[10px] font-bold uppercase text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                Target: &ge;95%
+              </span>
             </div>
-
-            <div className="space-y-3.5">
-              {deptCompliance.map((dept: any, idx: number) => (
-                <div key={idx} className="p-3 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
-                  <div className="min-w-0 pr-2">
-                    <div className="text-xs font-bold text-slate-800 truncate">{dept.name}</div>
-                    <div className="text-[11px] text-slate-500 mt-0.5">
-                      {dept.cleared} of {dept.total} verified
-                    </div>
+            <div className="mt-4 space-y-3.5">
+              {deptCompliance.map((item: any) => (
+                <div key={item.name || item.dept}>
+                  <div className="flex items-center justify-between text-xs font-semibold mb-1">
+                    <span className="text-slate-700 truncate mr-2">{item.name || item.dept}</span>
+                    <span className="text-slate-900 font-bold shrink-0">{item.percent || item.compliance}%</span>
                   </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-xs font-bold font-mono text-slate-900">{dept.percent}%</div>
-                    <span className={`inline-block text-[9.5px] font-semibold px-1.5 py-0.5 rounded ${
-                      dept.status === 'Optimal' || dept.status === 'Full Parity'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : dept.status === 'Compliant'
-                        ? 'bg-blue-100 text-blue-800'
-                        : 'bg-amber-100 text-amber-800'
-                    }`}>
-                      {dept.status}
-                    </span>
+                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${
+                        (item.percent || item.compliance) >= 95
+                          ? 'bg-emerald-500'
+                          : (item.percent || item.compliance) >= 90
+                          ? 'bg-secondary'
+                          : 'bg-red-500'
+                      }`}
+                      style={{ width: `${item.percent || item.compliance}%` }}
+                    />
                   </div>
                 </div>
               ))}
             </div>
           </div>
+          <div className="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-400 flex items-center justify-between">
+            <span>Overall Workforce Compliance</span>
+            <span className="font-bold text-emerald-600">95.4% Target Achieved</span>
+          </div>
+        </div>
 
-          <div className="mt-5 pt-3 border-t border-slate-100 text-center">
-            <span className="text-xs text-secondary font-bold hover:underline cursor-pointer">
-              View All 26 Master Departments &rarr;
-            </span>
+        {/* Clinic Partner Workload Distribution */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[20px] text-primary">local_hospital</span>
+                <h3 className="font-display font-extrabold text-sm text-slate-900">
+                  Clinic Partner Workload
+                </h3>
+              </div>
+              <span className="text-[10px] font-bold uppercase text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                5 Facilities
+              </span>
+            </div>
+            <div className="mt-4 space-y-3.5">
+              {clinicWorkload.map((item: any) => (
+                <div key={item.id || item.code || item.name}>
+                  <div className="flex items-center justify-between text-xs font-semibold mb-1">
+                    <span className="text-slate-700 truncate mr-2">{item.code} - {item.name}</span>
+                    <span className="text-slate-900 font-bold shrink-0">{item.assigned ?? item.count} exams</span>
+                  </div>
+                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary rounded-full"
+                      style={{ width: `${Math.min(100, Math.max(10, item.utilization || item.share || 20))}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-400 flex items-center justify-between">
+            <span>SAP Contract Allocation</span>
+            <span className="font-bold text-slate-700">Balanced Capacity</span>
           </div>
         </div>
       </div>
 
-      {/* Recent Medical Clearances Table (from Claude Artifact vOverview) */}
-      <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="font-display font-bold text-base text-slate-900">
-              Recent Medical Reports & Certificates
+      {/* 5. Recently Issued Medical Fitness Certificates (Live Database Table) */}
+      <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-sm space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[20px] text-primary">verified</span>
+            <h3 className="font-display font-extrabold text-sm text-slate-900">
+              Recently Issued Medical Fitness Certificates
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Newly uploaded clearance outcomes with cryptographic verification QR codes
-            </p>
           </div>
-          <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-200">
-            {recentReports.length} Recent Records
+          <span className="text-xs text-slate-500 font-medium">
+            Live issuance trail from PostgreSQL
           </span>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-xl border border-slate-200">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 border-y border-slate-200 text-slate-500 uppercase text-[10px] font-semibold">
+            <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[10.5px]">
               <tr>
-                <th className="py-2.5 px-3">Certificate #</th>
-                <th className="py-2.5 px-3">Employee</th>
-                <th className="py-2.5 px-3">Test Package</th>
-                <th className="py-2.5 px-3">Clinic</th>
-                <th className="py-2.5 px-3">Valid Until</th>
-                <th className="py-2.5 px-3">Result</th>
-                <th className="py-2.5 px-3 text-right">Actions</th>
+                <th className="py-2.5 px-3">Cert #</th>
+                <th className="py-2.5 px-3">Employee Name</th>
+                <th className="py-2.5 px-3">Employee No</th>
+                <th className="py-2.5 px-3">Medical Protocol</th>
+                <th className="py-2.5 px-3">Accredited Clinic</th>
+                <th className="py-2.5 px-3">Exam Date</th>
+                <th className="py-2.5 px-3">Outcome</th>
+                <th className="py-2.5 px-3 text-right">Certificate Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {recentReports.map((rep) => (
-                <tr key={rep.id} className="hover:bg-slate-50">
-                  <td className="py-2.5 px-3 font-mono font-bold text-slate-800">{rep.id}</td>
-                  <td className="py-2.5 px-3">
-                    <div className="font-bold text-slate-900">{rep.employee?.name}</div>
-                    <div className="text-[10.5px] text-slate-400 font-mono">SAP: {rep.employee?.employeeNo}</div>
-                  </td>
-                  <td className="py-2.5 px-3 text-slate-800">{rep.test?.name}</td>
-                  <td className="py-2.5 px-3 font-bold text-slate-700">{rep.vendor?.code}</td>
-                  <td className="py-2.5 px-3 font-mono">{rep.validUntil ? rep.validUntil.slice(0, 10) : '—'}</td>
-                  <td className="py-2.5 px-3">
-                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                      rep.result === 'FIT' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
-                    }`}>
-                      {rep.result}
-                    </span>
-                  </td>
-                  <td className="py-2.5 px-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenCertificate(rep.id)}
-                      className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10.5px] px-2.5 py-1 rounded-lg cursor-pointer"
-                    >
-                      Certificate
-                    </button>
+            <tbody className="divide-y divide-slate-100 font-medium">
+              {recentReports.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="py-8 text-center text-slate-400">
+                    No issued medical reports in database yet.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                recentReports.map((rep) => (
+                  <tr key={rep.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="py-3 px-3 font-mono font-bold text-slate-900">{rep.id}</td>
+                    <td className="py-3 px-3 font-bold text-slate-800">{rep.employee?.name}</td>
+                    <td className="py-3 px-3 font-mono text-slate-500">{rep.employee?.employeeNo}</td>
+                    <td className="py-3 px-3 text-slate-700">{rep.test?.name}</td>
+                    <td className="py-3 px-3 text-slate-700">{rep.vendor?.name}</td>
+                    <td className="py-3 px-3 text-slate-500">
+                      {new Date(rep.testDate).toLocaleDateString()}
+                    </td>
+                    <td className="py-3 px-3">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                        {rep.result || 'FIT'} (ISSUED)
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 text-right">
+                      <button
+                        onClick={() => handleOpenCertificate(rep.id)}
+                        className="px-3 py-1 rounded-lg bg-secondary hover:bg-secondary-hover text-white text-xs font-bold transition-all shadow-xs cursor-pointer inline-flex items-center gap-1"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">visibility</span>
+                        <span>View Certificate</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Accredited Clinics Workload & Daily Capacity Quotas */}
-      <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="font-display font-bold text-base text-slate-900">
-              Accredited Medical Providers — Daily Quota & Utilization
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Live capacity monitoring across approved clinics under contractual Net 30 terms
-            </p>
-          </div>
-          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-lg">
-            5 Clinics Contracted
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 pt-1">
-          {clinicWorkload.map((clinic: any) => (
-            <div key={clinic.id} className="p-4 rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="font-bold text-sm text-slate-900">{clinic.code}</span>
-                  <span className="text-[10px] font-bold text-slate-400 font-mono">#{clinic.sapVendorNo}</span>
-                </div>
-                <div className="text-xs text-slate-600 line-clamp-1 mb-3" title={clinic.name}>
-                  {clinic.name}
-                </div>
-                
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="text-slate-500">Utilization:</span>
-                  <span className="font-bold font-mono text-slate-800">{clinic.utilization}%</span>
-                </div>
-                <div className="w-full bg-slate-200 rounded-full h-1.5 mb-2 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${
-                      clinic.utilization > 80 ? 'bg-red-500' : clinic.utilization > 50 ? 'bg-secondary' : 'bg-emerald-500'
-                    }`}
-                    style={{ width: `${Math.max(5, clinic.utilization)}%` }}
-                  ></div>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-[11px] text-slate-500">
-                <span>Avail: <strong className="text-emerald-600 font-mono">{clinic.available}</strong></span>
-                <span>Cap: <strong className="text-slate-800 font-mono">{clinic.capacity}/d</strong></span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Certificate Modal */}
+      {/* Official Certificate Modal */}
       {selectedCertificate && (
         <CertificateModal
           certificate={selectedCertificate}

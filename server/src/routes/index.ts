@@ -75,7 +75,7 @@ router.patch(
 router.patch(
   '/requests/:id/schedule',
   authenticate,
-  requireRole([Role.CLINIC]),
+  requireRole([Role.CLINIC, Role.CENTRAL, Role.HR, Role.REQUESTER]),
   RequestsController.scheduleAppointment
 );
 router.patch(
@@ -89,6 +89,11 @@ router.patch(
   authenticate,
   requireRole([Role.CENTRAL]),
   RequestsController.reject
+);
+router.patch(
+  '/requests/:id',
+  authenticate,
+  RequestsController.update
 );
 
 // ==========================================

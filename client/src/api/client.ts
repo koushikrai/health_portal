@@ -56,8 +56,9 @@ export const api = {
   getRequests: (params?: { status?: string; vendorId?: string; search?: string }) => apiClient.get('/requests', { params }),
   createRequest: (data: any) => apiClient.post('/requests', data),
   bulkCreateRequests: (requests: any[]) => apiClient.post('/requests/bulk', { requests }),
-  batchAssignRequests: (requestIds: string[], vendorId: string) => apiClient.patch('/requests/batch-assign', { requestIds, vendorId }),
-  scheduleAppointment: (id: string, apptDate: string) => apiClient.patch(`/requests/${id}/schedule`, { apptDate }),
+  batchAssignRequests: (requestIds: string[], vendorId: string, apptDate?: string) => apiClient.patch('/requests/batch-assign', { requestIds, vendorId, apptDate }),
+  scheduleAppointment: (id: string, apptDate: string, note?: string) => apiClient.patch(`/requests/${id}/schedule`, { apptDate, note }),
+  updateRequest: (id: string, data: any) => apiClient.patch(`/requests/${id}`, data),
   cancelRequest: (id: string) => apiClient.patch(`/requests/${id}/cancel`),
   rejectRequest: (id: string, reason?: string) => apiClient.patch(`/requests/${id}/reject`, { reason }),
 

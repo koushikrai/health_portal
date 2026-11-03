@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { api } from '../api/client';
 
 export const IntakeView: React.FC = () => {
@@ -23,6 +24,14 @@ export const IntakeView: React.FC = () => {
   const [bulkValidating, setBulkValidating] = useState(false);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [bulkSuccess, setBulkSuccess] = useState('');
+  const [bulkModeTab, setBulkModeTab] = useState<'upload' | 'paste'>('upload');
+
+  // Excel File Upload State
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadedFileName, setUploadedFileName] = useState('');
+  const [uploadedFileSize, setUploadedFileSize] = useState('');
+  const [uploadError, setUploadError] = useState('');
+  const [isDragOver, setIsDragOver] = useState(false);
 
   useEffect(() => {
     loadTests();
@@ -110,28 +119,24 @@ export const IntakeView: React.FC = () => {
     }
   };
 
-  // Bulk Upload Parsing & Validation
-  const handleParseBulk = async () => {
-    if (!bulkText.trim()) return;
+  // ==========================================
+  // Excel File Parsing & Bulk Validation
+  // ==========================================
+  const validateParsedRows = async (rawRows: Array<{ employeeNo: string; testIdOrName: string; needBy: string; rowNote: string }>) => {
     setBulkValidating(true);
-
-    const lines = bulkText.trim().split('\n');
+    setUploadError('');
     const parsed: any[] = [];
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      // Split by tab, comma, or semicolon
-      const parts = line.split(/[\t,;]+/).map(p => p.trim());
-      const employeeNo = parts[0] || '';
-      const testIdOrName = parts[1] || '5004959';
-      const needBy = parts[2] || '';
-      const rowNote = parts[3] || 'Bulk upload batch';
+    for (let i = 0; i < rawRows.length; i++) {
+      const item = rawRows[i];
+      const { employeeNo, testIdOrName, needBy, rowNote } = item;
 
       // Find matched test
-      const matchedTest = tests.find(t => t.id === testIdOrName || t.name.toLowerCase().includes(testIdOrName.toLowerCase())) || tests[0];
+      const matchedTest = tests.find(t => 
+        t.id === testIdOrName || 
+        t.name.toLowerCase().includes(testIdOrName.toLowerCase())
+      ) || tests[0];
 
-      // Query employee from API
       let employee = null;
       let status = 'INVALID_EMP';
       let message = 'Employee not found in HR master';
@@ -173,12 +178,201 @@ export const IntakeView: React.FC = () => {
     setBulkValidating(false);
   };
 
+  const processExcelFile = async (file: File) => {
+    const validExtensions = ['.xlsx', '.xls', '.csv'];
+    const hasValidExt = validExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+    if (!hasValidExt) {
+      setUploadError('Please select a valid Excel spreadsheet (.xlsx, .xls) or .csv file.');
+      return;
+    }
+
+    setUploadedFileName(file.name);
+    setUploadedFileSize(`${(file.size / 1024).toFixed(1)} KB`);
+    setUploadError('');
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+
+      if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+        setUploadError('The selected Excel workbook contains no worksheets.');
+        return;
+      }
+
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rawRows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, dateNF: 'yyyy-mm-dd' });
+
+      if (!rawRows || rawRows.length === 0) {
+        setUploadError('The selected Excel sheet appears to be empty.');
+        return;
+      }
+
+      // Check if row 0 has header text
+      let startIndex = 0;
+      const firstRowStr = rawRows[0].map(c => String(c || '').toLowerCase()).join(' ');
+      if (
+        firstRowStr.includes('sap') || 
+        firstRowStr.includes('iqama') || 
+        firstRowStr.includes('test') || 
+        firstRowStr.includes('employee') || 
+        firstRowStr.includes('badge') ||
+        firstRowStr.includes('code') ||
+        firstRowStr.includes('name')
+      ) {
+        startIndex = 1;
+      }
+
+      const rowObjects: Array<{ employeeNo: string; testIdOrName: string; needBy: string; rowNote: string }> = [];
+      for (let i = startIndex; i < rawRows.length; i++) {
+        const row = rawRows[i];
+        if (!row || row.length === 0) continue;
+
+        const employeeNo = String(row[0] || '').trim();
+        const testIdOrName = String(row[1] || '5004959').trim();
+        let needBy = String(row[2] || '').trim();
+        const rowNote = String(row[3] || 'Excel roster batch upload').trim();
+
+        if (needBy) {
+          const d = new Date(needBy);
+          if (!isNaN(d.getTime())) {
+            needBy = d.toISOString().slice(0, 10);
+          }
+        }
+
+        if (employeeNo) {
+          rowObjects.push({ employeeNo, testIdOrName, needBy, rowNote });
+        }
+      }
+
+      if (rowObjects.length === 0) {
+        setUploadError('No valid employee rows found in the sheet. Please ensure column 1 contains SAP IDs.');
+        return;
+      }
+
+      // Populate text representation for clipboard transparency
+      const textRepresentation = rowObjects.map(r => `${r.employeeNo}\t${r.testIdOrName}\t${r.needBy}\t${r.rowNote}`).join('\n');
+      setBulkText(textRepresentation);
+
+      // Trigger automatic validation
+      await validateParsedRows(rowObjects);
+
+    } catch (err: any) {
+      console.error('Excel parse error:', err);
+      setUploadError(`Failed to parse file: ${err.message || 'Corrupted or unsupported Excel structure'}`);
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processExcelFile(file);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processExcelFile(file);
+    }
+  };
+
+  const handleClearUploadedFile = () => {
+    setUploadedFileName('');
+    setUploadedFileSize('');
+    setUploadError('');
+    setBulkText('');
+    setBulkRows([]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    const templateData = [
+      {
+        'SAP ID / Iqama': '11000016',
+        'Test Code / Name': '5004955',
+        'Need-By (YYYY-MM-DD)': '2026-11-20',
+        'Purpose / Note': 'Sadara Turnaround Gate Pass'
+      },
+      {
+        'SAP ID / Iqama': '11000012',
+        'Test Code / Name': '5004959',
+        'Need-By (YYYY-MM-DD)': '2026-11-15',
+        'Purpose / Note': 'SABIC Gate Pass Renewal'
+      },
+      {
+        'SAP ID / Iqama': '11000017',
+        'Test Code / Name': '5004964',
+        'Need-By (YYYY-MM-DD)': '2026-11-25',
+        'Purpose / Note': 'PetroKemya Site Clearance'
+      },
+      {
+        'SAP ID / Iqama': '11000008',
+        'Test Code / Name': '5004959',
+        'Need-By (YYYY-MM-DD)': '2026-11-10',
+        'Purpose / Note': 'Sulaiman Active Turnaround'
+      }
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    ws['!cols'] = [
+      { wch: 18 },
+      { wch: 22 },
+      { wch: 24 },
+      { wch: 35 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'ECC Clearance Roster');
+    XLSX.writeFile(wb, 'ECC_Medical_Clearance_Roster_Template.xlsx');
+  };
+
+  // Bulk Upload Parsing from Clipboard Text
+  const handleParseBulk = async () => {
+    if (!bulkText.trim()) return;
+
+    const lines = bulkText.trim().split('\n');
+    const rowObjects = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const parts = line.split(/[\t,;]+/).map(p => p.trim());
+      const employeeNo = parts[0] || '';
+      const testIdOrName = parts[1] || '5004959';
+      const needBy = parts[2] || '';
+      const rowNote = parts[3] || 'Bulk roster upload';
+
+      if (employeeNo) {
+        rowObjects.push({ employeeNo, testIdOrName, needBy, rowNote });
+      }
+    }
+
+    await validateParsedRows(rowObjects);
+  };
+
   const handleLoadSampleBulk = () => {
     const sample = `11000016\t5004955\t2026-11-20\tSadara Turnaround
 11000012\t5004959\t2026-11-15\tSABIC Gate Pass
 11000017\t5004964\t2026-11-25\tPetroKemya Site
 11000008\t5004959\t2026-11-10\tSulaiman Active`;
     setBulkText(sample);
+    setUploadedFileName('Sample_ECC_Roster.xlsx');
+    setUploadedFileSize('4 sample records');
+    setUploadError('');
   };
 
   const handleSubmitBulk = async () => {
@@ -530,72 +724,247 @@ export const IntakeView: React.FC = () => {
         </div>
       )}
 
-      {/* Mode 2: Bulk Upload View (from Claude Artifact vBulk) */}
+      {/* Mode 2: Bulk Upload View */}
       {mode === 'bulk' && (
         <div className="space-y-6">
           <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 border-b border-slate-100 gap-2 mb-4">
+            {/* Header & Main Action Buttons */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-slate-100 gap-3 mb-5">
               <div>
-                <h3 className="font-display font-bold text-base text-slate-900">
-                  Bulk Request Upload (Excel / CSV Paste)
+                <h3 className="font-display font-bold text-base text-slate-900 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-emerald-600 text-[22px]">table_chart</span>
+                  <span>Bulk Request Intake (Excel Roster / CSV)</span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Paste rows directly copied from Microsoft Excel or CSV. The system validates SAP ID, test code, and certificate eligibility automatically.
+                  Upload an Excel spreadsheet (.xlsx, .xls) or paste roster rows. System validates SAP IDs, test codes, and certificate eligibility automatically.
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={handleLoadSampleBulk}
-                className="text-xs font-bold text-secondary bg-orange-50 hover:bg-orange-100 px-3 py-1.5 rounded-xl border border-orange-200 cursor-pointer"
-              >
-                Load Sample Roster Rows
-              </button>
-            </div>
-
-            {/* Expected Format Guide */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 mb-4 text-xs">
-              <span className="font-bold text-slate-700 block mb-1">Expected Column Order (Tab or Comma Separated):</span>
-              <div className="grid grid-cols-4 gap-2 font-mono text-[11px] text-slate-600">
-                <span className="p-1 rounded bg-white border border-slate-200 text-center font-bold">1. SAP ID / Iqama</span>
-                <span className="p-1 rounded bg-white border border-slate-200 text-center font-bold">2. Test Code / Name</span>
-                <span className="p-1 rounded bg-white border border-slate-200 text-center font-bold">3. Need-By (YYYY-MM-DD)</span>
-                <span className="p-1 rounded bg-white border border-slate-200 text-center font-bold">4. Purpose / Note</span>
-              </div>
-            </div>
-
-            {/* Paste Textarea */}
-            <div className="space-y-2">
-              <textarea
-                rows={5}
-                value={bulkText}
-                onChange={(e) => setBulkText(e.target.value)}
-                placeholder="Paste rows here from Excel... (e.g. 11000016 [TAB] 5004955 [TAB] 2026-11-20 [TAB] Turnaround)"
-                className="w-full font-mono bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:border-secondary"
-              ></textarea>
-
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-[11px] text-slate-400">
-                  {bulkText.trim().split('\n').filter(Boolean).length} rows detected in paste buffer
-                </span>
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleDownloadTemplate}
+                  className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 px-3 py-2 rounded-xl border border-slate-200 shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Download standard Excel roster template (.xlsx)"
+                >
+                  <span className="material-symbols-outlined text-[17px] text-emerald-600">download</span>
+                  <span>Template (.xlsx)</span>
+                </button>
 
                 <button
                   type="button"
-                  disabled={bulkValidating || !bulkText.trim()}
-                  onClick={handleParseBulk}
-                  className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-5 py-2 rounded-xl transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Upload .xlsx or .xls file directly"
                 >
-                  {bulkValidating ? (
-                    <span>Validating against HR Master...</span>
-                  ) : (
-                    <>
-                      <span className="material-symbols-outlined text-[16px]">sync</span>
-                      <span>Validate Rows</span>
-                    </>
-                  )}
+                  <span className="material-symbols-outlined text-[17px]">upload_file</span>
+                  <span>Upload Excel Sheet</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleLoadSampleBulk}
+                  className="text-xs font-bold text-secondary bg-orange-50 hover:bg-orange-100 px-3 py-2 rounded-xl border border-orange-200 cursor-pointer"
+                >
+                  Load Sample Rows
                 </button>
               </div>
             </div>
+
+            {/* Hidden File Input */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileInputChange}
+              accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+              className="hidden"
+            />
+
+            {/* Upload Error Banner */}
+            {uploadError && (
+              <div className="mb-4 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="material-symbols-outlined text-red-600 text-[20px]">error</span>
+                  <span>{uploadError}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setUploadError('')}
+                  className="text-red-500 hover:text-red-800 font-bold"
+                >
+                  &times;
+                </button>
+              </div>
+            )}
+
+            {/* Sub-Tabs: File Upload vs Clipboard Paste */}
+            <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-2">
+              <button
+                type="button"
+                onClick={() => setBulkModeTab('upload')}
+                className={`text-xs font-bold pb-2 px-1 border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${
+                  bulkModeTab === 'upload'
+                    ? 'border-emerald-600 text-emerald-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[17px]">attach_file</span>
+                <span>Upload Excel File</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setBulkModeTab('paste')}
+                className={`text-xs font-bold pb-2 px-1 border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${
+                  bulkModeTab === 'paste'
+                    ? 'border-secondary text-secondary'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[17px]">content_paste</span>
+                <span>Paste from Clipboard / Text</span>
+              </button>
+            </div>
+
+            {/* Expected Column Format Guide */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4 text-xs">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="font-bold text-slate-700">Expected Column Order in Excel / CSV:</span>
+                <span className="text-[11px] text-slate-400">Header row is detected and skipped automatically</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-[11px] text-slate-600">
+                <span className="p-1.5 rounded bg-white border border-slate-200 text-center font-bold">1. SAP ID / Iqama</span>
+                <span className="p-1.5 rounded bg-white border border-slate-200 text-center font-bold">2. Test Code / Name</span>
+                <span className="p-1.5 rounded bg-white border border-slate-200 text-center font-bold">3. Need-By (YYYY-MM-DD)</span>
+                <span className="p-1.5 rounded bg-white border border-slate-200 text-center font-bold">4. Purpose / Note</span>
+              </div>
+            </div>
+
+            {/* Tab 1: Upload Excel File Dropzone / Active File View */}
+            {bulkModeTab === 'upload' && (
+              <div>
+                {uploadedFileName ? (
+                  <div className="p-4 rounded-2xl bg-emerald-50/70 border-2 border-emerald-300 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-3.5">
+                      <div className="h-12 w-12 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                        <span className="material-symbols-outlined text-[26px]">description</span>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-slate-900">{uploadedFileName}</span>
+                          <span className="text-[10px] font-bold uppercase bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded-full">
+                            Parsed
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-3">
+                          <span>Size: {uploadedFileSize}</span>
+                          <span>&bull;</span>
+                          <span>{bulkRows.length} rows loaded into batch preview</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 px-3.5 py-1.5 rounded-xl shadow-xs transition-all cursor-pointer"
+                      >
+                        Choose Different File
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleClearUploadedFile}
+                        className="text-xs font-bold text-red-600 bg-white hover:bg-red-50 border border-red-200 px-3 py-1.5 rounded-xl transition-all cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all ${
+                      isDragOver
+                        ? 'border-emerald-500 bg-emerald-50/60'
+                        : 'border-slate-300 hover:border-emerald-400 hover:bg-slate-50/60 bg-white'
+                    }`}
+                  >
+                    <div className="mx-auto w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mb-3">
+                      <span className="material-symbols-outlined text-[26px]">upload_file</span>
+                    </div>
+                    <div className="font-bold text-sm text-slate-800">
+                      Click to upload or drag & drop your Excel sheet
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                      Supports Microsoft Excel spreadsheets (.xlsx, .xls) and CSV roster exports up to 10MB
+                    </p>
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          fileInputRef.current?.click();
+                        }}
+                        className="inline-flex items-center gap-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl shadow-sm transition-all cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[17px]">folder_open</span>
+                        <span>Browse Excel Files</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab 2: Clipboard Paste Area */}
+            {bulkModeTab === 'paste' && (
+              <div className="space-y-2">
+                <textarea
+                  rows={5}
+                  value={bulkText}
+                  onChange={(e) => setBulkText(e.target.value)}
+                  placeholder="Paste rows here from Excel... (e.g. 11000016 [TAB] 5004955 [TAB] 2026-11-20 [TAB] Turnaround)"
+                  className="w-full font-mono bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:border-secondary"
+                ></textarea>
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[11px] text-slate-400">
+                    {bulkText.trim().split('\n').filter(Boolean).length} rows detected in paste buffer
+                  </span>
+
+                  <button
+                    type="button"
+                    disabled={bulkValidating || !bulkText.trim()}
+                    onClick={handleParseBulk}
+                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-5 py-2 rounded-xl transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {bulkValidating ? (
+                      <span>Validating against HR Master...</span>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-[16px]">sync</span>
+                        <span>Validate Rows</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Validating Progress Banner */}
+            {bulkValidating && (
+              <div className="mt-4 p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-center gap-3">
+                <span className="h-4 w-4 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin"></span>
+                <span className="font-semibold">
+                  Validating employee SAP IDs against HR Master and running duplicate certificate checks...
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Validation Results Table */}

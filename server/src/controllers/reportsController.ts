@@ -71,15 +71,25 @@ export class ReportsController {
       }
 
       const repCount = await prisma.medicalReport.count();
-      const repId = `REP-${String(repCount + 81).padStart(4, '0')}`;
 
       const formattedRemarks = doctorName
         ? `[Examining Physician: ${doctorName}] ${remarks || ''}`
         : (remarks || '');
 
-      // Create Report
-      const report = await prisma.medicalReport.create({
-        data: {
+      // Upsert Report (handles both initial generation and subsequent updates/re-certification)
+      const existingReport = await prisma.medicalReport.findUnique({ where: { requestId } });
+      const repId = existingReport?.id || `REP-${String(repCount + 81).padStart(4, '0')}`;
+
+      const report = await prisma.medicalReport.upsert({
+        where: { requestId },
+        update: {
+          result: result as ReportResult,
+          testDate: tDate,
+          validUntil,
+          remarks: formattedRemarks,
+          fileUrl: fileUrl || ''
+        },
+        create: {
           id: repId,
           requestId,
           employeeId: request.employeeId,

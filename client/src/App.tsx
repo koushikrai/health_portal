@@ -198,6 +198,7 @@ export function App() {
           userName={userName}
           onSwitchRole={handleSwitchRole}
           onLogout={handleLogout}
+          onNavigateToTab={setCurrentTab}
         />
 
         <main className="flex-1 overflow-y-auto">
@@ -211,11 +212,17 @@ export function App() {
             />
           ) : (
             <>
-              {currentTab === 'dashboard' && <DashboardView />}
+              {currentTab === 'dashboard' && <DashboardView onNavigateToTab={setCurrentTab} />}
               {currentTab === 'intake' && <IntakeView />}
               {currentTab === 'requests' && <RequestsQueueView userRole={userRole} />}
               {currentTab === 'reports' && <ReportsView />}
-              {currentTab === 'clinic' && <ClinicPortalView userRole={userRole} vendorId={vendorId} />}
+              {currentTab === 'clinic' && (
+                <ClinicPortalView
+                  userRole={userRole}
+                  vendorId={vendorId}
+                  onNavigateToTab={setCurrentTab}
+                />
+              )}
               {currentTab === 'finance' && <InvoiceClearanceView />}
               {currentTab === 'suppliers' && <SuppliersView />}
               {currentTab === 'audit' && <AuditLogView />}

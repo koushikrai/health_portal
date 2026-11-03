@@ -20,6 +20,15 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
   // Clinics for triage
   const [clinics, setClinics] = useState<any[]>([]);
   const [selectedClinicId, setSelectedClinicId] = useState<string>('V2');
+  const [triageApptDate, setTriageApptDate] = useState<string>('');
+
+  // Appointment Scheduling Modal state
+  const [schedulingRequest, setSchedulingRequest] = useState<any | null>(null);
+  const [apptDateInput, setApptDateInput] = useState<string>('');
+  const [apptTimeInput, setApptTimeInput] = useState<string>('09:00 AM');
+  const [apptNotesInput, setApptNotesInput] = useState<string>('');
+  const [schedulingLoading, setSchedulingLoading] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string>('');
 
   useEffect(() => {
     loadRequests();
@@ -66,11 +75,52 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
   const handleBatchAssign = async (vendorId: string) => {
     if (selectedIds.length === 0) return;
     try {
-      await api.batchAssignRequests(selectedIds, vendorId);
+      await api.batchAssignRequests(selectedIds, vendorId, triageApptDate || undefined);
+      setToastMessage(
+        `Successfully assigned ${selectedIds.length} candidate(s)${triageApptDate ? ` & scheduled for ${new Date(triageApptDate).toLocaleDateString()}` : ''}!`
+      );
+      setTimeout(() => setToastMessage(''), 5000);
       setSelectedIds([]);
+      setTriageApptDate('');
       loadRequests();
     } catch (e: any) {
       alert(`Assignment failed: ${e.response?.data?.error || e.message}`);
+    }
+  };
+
+  const handleOpenScheduleModal = (req: any) => {
+    setSchedulingRequest(req);
+    if (req.apptDate) {
+      const d = new Date(req.apptDate);
+      setApptDateInput(d.toISOString().slice(0, 10));
+    } else {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      setApptDateInput(tomorrow.toISOString().slice(0, 10));
+    }
+    setApptTimeInput('09:00 AM');
+    setApptNotesInput(req.note || 'Patient must fast 8-10 hours prior to blood draw. Bring original Iqama / National ID.');
+  };
+
+  const handleQuickDatePreset = (daysToAdd: number) => {
+    const target = new Date();
+    target.setDate(target.getDate() + daysToAdd);
+    setApptDateInput(target.toISOString().slice(0, 10));
+  };
+
+  const handleConfirmSchedule = async () => {
+    if (!schedulingRequest || !apptDateInput) return;
+    try {
+      setSchedulingLoading(true);
+      await api.scheduleAppointment(schedulingRequest.id, apptDateInput, apptNotesInput);
+      setToastMessage(`Appointment confirmed for ${schedulingRequest.employee?.name || 'Worker'} on ${new Date(apptDateInput).toLocaleDateString()}!`);
+      setTimeout(() => setToastMessage(''), 5000);
+      setSchedulingRequest(null);
+      await loadRequests();
+    } catch (e: any) {
+      alert(`Scheduling failed: ${e.response?.data?.error || e.message}`);
+    } finally {
+      setSchedulingLoading(false);
     }
   };
 
@@ -96,7 +146,20 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-4 lg:p-6 max-w-7xl mx-auto space-y-6">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-bold flex items-center justify-between shadow-sm animate-fade-in">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-emerald-600 text-[20px]">check_circle</span>
+            <span>{toastMessage}</span>
+          </div>
+          <button onClick={() => setToastMessage('')} className="text-emerald-700 hover:text-emerald-900 cursor-pointer">
+            <span className="material-symbols-outlined text-[16px]">close</span>
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-slate-200 gap-3">
         <div>
@@ -138,7 +201,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
               </div>
             </div>
 
-            {/* Clinic Allocation Controls */}
+            {/* Clinic Allocation & Scheduling Controls */}
             <div className="flex flex-wrap items-center gap-2.5">
               <span className="text-[11px] font-bold uppercase text-slate-300">Target Clinic:</span>
               
@@ -161,6 +224,18 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
                 ))}
               </select>
 
+              {/* Optional Batch Appointment Date Picker */}
+              <div className="flex items-center gap-1.5 bg-[#0B1020] border border-slate-700 rounded-xl px-2.5 py-1.5">
+                <span className="material-symbols-outlined text-[16px] text-slate-400">calendar_month</span>
+                <input
+                  type="date"
+                  value={triageApptDate}
+                  onChange={(e) => setTriageApptDate(e.target.value)}
+                  className="bg-transparent text-white text-xs font-semibold focus:outline-none cursor-pointer"
+                  title="Optional: Set appointment date during batch assignment"
+                />
+              </div>
+
               {/* Primary Batch Assign Button */}
               <button
                 disabled={selectedIds.length === 0}
@@ -170,7 +245,9 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
                 }`}
               >
                 <span className="material-symbols-outlined text-[16px]">send</span>
-                <span>Assign {selectedIds.length > 0 ? `(${selectedIds.length})` : ''} to Clinic</span>
+                <span>
+                  {triageApptDate ? 'Assign & Schedule' : 'Assign'} {selectedIds.length > 0 ? `(${selectedIds.length})` : ''} to Clinic
+                </span>
               </button>
             </div>
           </div>
@@ -271,11 +348,26 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
                       )}
                     </td>
 
-                    <td className="py-3 px-4 font-mono text-slate-600">
+                    {/* Interactive Appointment Column */}
+                    <td className="py-3 px-4 font-mono">
                       {req.apptDate ? (
-                        <span className="text-blue-700 font-bold">{new Date(req.apptDate).toLocaleDateString()}</span>
+                        <button
+                          onClick={() => handleOpenScheduleModal(req)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs border border-blue-200 transition-all cursor-pointer group shadow-2xs"
+                          title="Click to view or reschedule appointment"
+                        >
+                          <span className="material-symbols-outlined text-[15px] text-blue-600 group-hover:scale-110 transition-transform">event_available</span>
+                          <span>{new Date(req.apptDate).toLocaleDateString()}</span>
+                        </button>
                       ) : (
-                        <span className="text-slate-400">Not set</span>
+                        <button
+                          onClick={() => handleOpenScheduleModal(req)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold transition-all cursor-pointer group shadow-2xs"
+                          title="Click to schedule patient appointment"
+                        >
+                          <span className="material-symbols-outlined text-[15px] text-amber-600 group-hover:scale-110 transition-transform">calendar_add_on</span>
+                          <span>+ Schedule</span>
+                        </button>
                       )}
                     </td>
 
@@ -294,6 +386,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
                       </span>
                     </td>
 
+                    {/* ACTIONS Column with Schedule Button */}
                     <td className="py-3 px-4 text-right">
                       {req.report ? (
                         <button
@@ -304,14 +397,25 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
                           <span>Certificate</span>
                         </button>
                       ) : (
-                        <div className="flex items-center justify-end gap-1">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {/* Schedule Button */}
+                          <button
+                            onClick={() => handleOpenScheduleModal(req)}
+                            className="px-2.5 py-1 rounded-lg bg-primary hover:bg-slate-900 text-white text-xs font-bold transition-all shadow-xs inline-flex items-center gap-1 cursor-pointer"
+                            title="Schedule appointment slot"
+                          >
+                            <span className="material-symbols-outlined text-[15px]">calendar_month</span>
+                            <span>{req.apptDate ? 'Reschedule' : 'Schedule'}</span>
+                          </button>
+
+                          {/* Reject Option */}
                           {req.status === 'WAITING' && (userRole === 'CENTRAL' || userRole === 'ADMIN') && (
                             <button
                               onClick={() => setRejectingId(req.id)}
-                              className="text-red-600 hover:bg-red-50 p-1 rounded transition-colors"
+                              className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1 rounded-lg transition-colors cursor-pointer"
                               title="Reject Request"
                             >
-                              <span className="material-symbols-outlined text-[17px]">cancel</span>
+                              <span className="material-symbols-outlined text-[18px]">cancel</span>
                             </button>
                           )}
                         </div>
@@ -324,6 +428,177 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
           </table>
         </div>
       </div>
+
+      {/* Schedule Appointment Modal */}
+      {schedulingRequest && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-fade-in space-y-5">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[22px]">calendar_month</span>
+                </div>
+                <div>
+                  <h3 className="font-display font-extrabold text-base text-slate-900">
+                    Schedule Patient Appointment
+                  </h3>
+                  <p className="text-xs text-slate-400">Request #{schedulingRequest.id}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSchedulingRequest(null)}
+                className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            {/* Candidate & Protocol Summary Card */}
+            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-900 text-sm">{schedulingRequest.employee?.name}</span>
+                <span className="font-mono text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+                  SAP: {schedulingRequest.employee?.employeeNo}
+                </span>
+              </div>
+              <div className="text-slate-600 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px]">
+                <span>Iqama: <strong className="font-mono text-slate-800">{schedulingRequest.employee?.iqamaId || '2490184820'}</strong></span>
+                <span>Dept: <strong className="text-slate-800">{schedulingRequest.department || 'PMTA'}</strong></span>
+                <span>Test: <strong className="text-primary">{schedulingRequest.test?.name}</strong></span>
+              </div>
+              <div className="pt-2 border-t border-slate-200 flex items-center justify-between text-[11px]">
+                <span className="text-slate-500">Assigned Facility:</span>
+                <span className="font-bold text-slate-800">
+                  {schedulingRequest.vendor ? `${schedulingRequest.vendor.code} — ${schedulingRequest.vendor.name}` : 'Unassigned (Assigned at Triage)'}
+                </span>
+              </div>
+            </div>
+
+            {/* Date Selection */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                Appointment Date
+              </label>
+
+              {/* Quick Presets */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleQuickDatePreset(0)}
+                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickDatePreset(1)}
+                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
+                >
+                  Tomorrow
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickDatePreset(3)}
+                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
+                >
+                  In 3 Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickDatePreset(7)}
+                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
+                >
+                  Next Week (+7d)
+                </button>
+              </div>
+
+              <input
+                type="date"
+                value={apptDateInput}
+                onChange={(e) => setApptDateInput(e.target.value)}
+                className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-primary shadow-xs cursor-pointer"
+              />
+            </div>
+
+            {/* Time Slot Selection */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                Preferred Shift Slot
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: '08:00 AM - 11:00 AM', label: 'Morning Slot', icon: 'wb_sunny' },
+                  { id: '11:00 AM - 14:00 PM', label: 'Midday Slot', icon: 'light_mode' },
+                  { id: '14:00 PM - 17:00 PM', label: 'Afternoon Slot', icon: 'wb_twilight' }
+                ].map(slot => (
+                  <button
+                    key={slot.id}
+                    type="button"
+                    onClick={() => setApptTimeInput(slot.id)}
+                    className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                      apptTimeInput === slot.id
+                        ? 'border-primary bg-primary/5 text-primary ring-1 ring-primary'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 text-xs font-bold mb-0.5">
+                      <span className="material-symbols-outlined text-[15px]">{slot.icon}</span>
+                      <span>{slot.label}</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 block font-mono">{slot.id}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Preparation / Clinical Instructions */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                Instructions / Clinical Notes
+              </label>
+              <textarea
+                value={apptNotesInput}
+                onChange={(e) => setApptNotesInput(e.target.value)}
+                rows={2}
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800 focus:outline-none focus:border-primary shadow-xs"
+                placeholder="Fasting requirements, original ID checklist..."
+              ></textarea>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setSchedulingRequest(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!apptDateInput || schedulingLoading}
+                onClick={handleConfirmSchedule}
+                className={`px-4 py-2 rounded-xl bg-primary hover:bg-slate-900 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all cursor-pointer ${
+                  !apptDateInput || schedulingLoading ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {schedulingLoading ? (
+                  <>
+                    <span className="h-3.5 w-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                    <span>Confirm Appointment</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Reject Modal */}
       {rejectingId && (

@@ -151,7 +151,7 @@ export class RequestsController {
 
   static async batchAssign(req: Request, res: Response) {
     try {
-      const { requestIds, vendorId } = req.body;
+      const { requestIds, vendorId, apptDate } = req.body;
       if (!Array.isArray(requestIds) || !vendorId) {
         return res.status(400).json({ error: 'requestIds array and vendorId are required' });
       }
@@ -165,25 +165,32 @@ export class RequestsController {
         orderBy: { createdAt: 'desc' }
       });
 
+      const updateData: any = {
+        vendorId,
+        slotId: activeSlot?.id,
+        status: apptDate ? RequestStatus.SCHEDULED : RequestStatus.SUBMITTED
+      };
+      if (apptDate) {
+        updateData.apptDate = new Date(apptDate);
+      }
+
       await prisma.medicalRequest.updateMany({
         where: { id: { in: requestIds } },
-        data: {
-          vendorId,
-          slotId: activeSlot?.id,
-          status: RequestStatus.SUBMITTED
-        }
+        data: updateData
       });
 
       await AuditService.log({
         userId: req.user?.id,
         actorName: req.user?.name || 'Central Team',
         role: req.user?.role || 'CENTRAL',
-        action: 'BATCH_ASSIGN_CLINIC',
+        action: apptDate ? 'BATCH_ASSIGN_AND_SCHEDULE' : 'BATCH_ASSIGN_CLINIC',
         entityType: 'MedicalRequest',
-        details: `Assigned ${requestIds.length} requests (${requestIds.join(', ')}) to clinic ${vendor.name}`
+        details: `Assigned ${requestIds.length} requests (${requestIds.join(', ')}) to clinic ${vendor.name}${apptDate ? ` scheduled for ${apptDate}` : ''}`
       });
 
-      return res.json({ message: `Successfully assigned ${requestIds.length} requests to ${vendor.name}` });
+      return res.json({
+        message: `Successfully assigned ${requestIds.length} requests to ${vendor.name}${apptDate ? ` on ${new Date(apptDate).toLocaleDateString()}` : ''}`
+      });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
@@ -192,34 +199,39 @@ export class RequestsController {
   static async scheduleAppointment(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const { apptDate } = req.body;
+      const { apptDate, note } = req.body;
       if (!apptDate) return res.status(400).json({ error: 'apptDate required' });
 
       const existing = await prisma.medicalRequest.findUnique({ where: { id } });
       if (!existing) return res.status(404).json({ error: 'Request not found' });
 
       // Guardrail: Clinic can only schedule appointments for their assigned facility
-      if (req.user?.role === 'CLINIC' && req.user.vendorId && existing.vendorId !== req.user.vendorId) {
+      if (req.user?.role === 'CLINIC' && req.user.vendorId && existing.vendorId && existing.vendorId !== req.user.vendorId) {
         return res.status(403).json({ error: 'Forbidden: You can only schedule appointments for requests assigned to your medical center' });
+      }
+
+      const updatePayload: any = {
+        apptDate: new Date(apptDate),
+        status: RequestStatus.SCHEDULED
+      };
+      if (note) {
+        updatePayload.note = note;
       }
 
       const request = await prisma.medicalRequest.update({
         where: { id },
-        data: {
-          apptDate: new Date(apptDate),
-          status: RequestStatus.SCHEDULED
-        },
-        include: { employee: true }
+        data: updatePayload,
+        include: { employee: true, vendor: true, test: true }
       });
 
       await AuditService.log({
         userId: req.user?.id,
-        actorName: req.user?.name || 'Clinic',
-        role: req.user?.role || 'CLINIC',
+        actorName: req.user?.name || 'Medical Coordinator',
+        role: req.user?.role || 'CENTRAL',
         action: 'SCHEDULE_APPOINTMENT',
         entityType: 'MedicalRequest',
         entityId: id,
-        details: `Scheduled medical exam for ${request.employee.name} on ${apptDate}`
+        details: `Scheduled medical exam for ${request.employee.name} on ${new Date(apptDate).toLocaleDateString()}`
       });
 
       return res.json({ request });
@@ -273,6 +285,33 @@ export class RequestsController {
         entityType: 'MedicalRequest',
         entityId: id,
         details: `Rejected request ${id}. Reason: ${reason || 'N/A'}`
+      });
+
+      return res.json({ request });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  static async update(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { note, apptDate, status, department } = req.body;
+      const updateData: any = {};
+      if (note !== undefined) updateData.note = typeof note === 'object' ? JSON.stringify(note) : String(note);
+      if (apptDate !== undefined) updateData.apptDate = apptDate ? new Date(apptDate) : null;
+      if (status !== undefined) updateData.status = status;
+      if (department !== undefined) updateData.department = department;
+
+      const request = await prisma.medicalRequest.update({
+        where: { id },
+        data: updateData,
+        include: {
+          employee: true,
+          test: true,
+          vendor: true,
+          report: true
+        }
       });
 
       return res.json({ request });

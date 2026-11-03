@@ -9,21 +9,29 @@ export default {
     extend: {
       colors: {
         primary: {
-          DEFAULT: '#1A1F45',
-          dark: '#0A0F1D',
-          navy: '#131B35',
+          DEFAULT: 'var(--color-primary, #1A1F45)',
+          dark: 'var(--color-primary-dark, #0A0F1D)',
+          navy: 'var(--color-primary-dark, #131B35)',
+          light: 'var(--color-primary-light, #2C356E)',
+          container: 'var(--color-primary-container, #131B35)',
+          'on-container': 'var(--color-on-primary-container, #FFFFFF)',
           fixed: '#E7E9F4'
         },
         secondary: {
-          DEFAULT: '#E97F29',
-          light: '#F7A65E',
-          hover: '#D46F1E',
-          container: '#FFF3EA',
-          fixed: '#FDE8D7',
-          'on-container': '#9A4603'
+          DEFAULT: 'var(--color-secondary, #E97F29)',
+          light: 'var(--color-secondary, #F7A65E)',
+          hover: 'var(--color-secondary-hover, #D46F1E)',
+          container: 'var(--color-secondary-container, #FFF3EA)',
+          fixed: 'var(--color-secondary-container, #FDE8D7)',
+          'on-container': 'var(--color-on-secondary-container, #9A4603)'
+        },
+        tertiary: {
+          DEFAULT: 'var(--color-tertiary, #0284C7)',
+          container: 'var(--color-tertiary-container, #E0F2FE)',
+          'on-container': 'var(--color-on-tertiary-container, #0369A1)'
         },
         surface: {
-          DEFAULT: '#F8FAFC',
+          DEFAULT: 'var(--color-surface-canvas, #F8FAFC)',
           container: '#E2E8F0',
           'container-low': '#F1F5F9',
           'container-high': '#E8EDF5',
@@ -38,7 +46,7 @@ export default {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
         display: ['"Plus Jakarta Sans"', 'Inter', 'system-ui', 'sans-serif'],
-        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace']
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace']
       },
       boxShadow: {
         'apple-sm': '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03)',
