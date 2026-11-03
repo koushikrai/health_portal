@@ -43,14 +43,16 @@ router.get('/requests', auth_1.authenticate, requestsController_1.RequestsContro
 router.post('/requests', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.HR, client_1.Role.REQUESTER, client_1.Role.CENTRAL]), requestsController_1.RequestsController.create);
 router.post('/requests/bulk', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.HR, client_1.Role.REQUESTER, client_1.Role.CENTRAL]), requestsController_1.RequestsController.bulkCreate);
 router.patch('/requests/batch-assign', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.CENTRAL]), requestsController_1.RequestsController.batchAssign);
-router.patch('/requests/:id/schedule', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.CLINIC]), requestsController_1.RequestsController.scheduleAppointment);
+router.patch('/requests/:id/schedule', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.CLINIC, client_1.Role.CENTRAL, client_1.Role.HR, client_1.Role.REQUESTER]), requestsController_1.RequestsController.scheduleAppointment);
 router.patch('/requests/:id/cancel', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.HR, client_1.Role.REQUESTER, client_1.Role.CENTRAL]), requestsController_1.RequestsController.cancel);
 router.patch('/requests/:id/reject', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.CENTRAL]), requestsController_1.RequestsController.reject);
+router.patch('/requests/:id', auth_1.authenticate, requestsController_1.RequestsController.update);
 // ==========================================
 // 6. Reports & Medical Fitness Certificates
 // ==========================================
 router.get('/reports', auth_1.authenticate, reportsController_1.ReportsController.list);
 router.post('/reports', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.CLINIC]), reportsController_1.ReportsController.submitResult);
+router.post('/reports/bulk-upload', auth_1.authenticate, reportsController_1.uploadReportsMulter.array('files', 150), reportsController_1.ReportsController.bulkUploadPdf);
 router.get('/reports/:id/certificate', auth_1.authenticate, reportsController_1.ReportsController.getCertificate);
 // ==========================================
 // 7. Finance Invoicing & 3-Way Match

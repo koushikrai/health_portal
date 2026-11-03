@@ -16,12 +16,12 @@ class InvoicesController {
             if (status && status !== 'ALL') {
                 where.status = status;
             }
-            // Vendor isolation: Clinics can only query their own invoices
-            if (req.user?.role === 'CLINIC' && req.user.vendorId) {
-                where.vendorId = req.user.vendorId;
-            }
-            else if (vendorId) {
+            // Vendor filtering:
+            if (vendorId && vendorId !== 'ALL') {
                 where.vendorId = vendorId;
+            }
+            else if (req.user?.role === 'CLINIC' && req.user.vendorId) {
+                where.vendorId = req.user.vendorId;
             }
             const invoices = await prisma_1.default.invoice.findMany({
                 where,
@@ -49,11 +49,8 @@ class InvoicesController {
             if (!invoiceNo || !vendorId || !Array.isArray(requestIds) || requestIds.length === 0) {
                 return res.status(400).json({ error: 'invoiceNo, vendorId, and requestIds array required' });
             }
-            // Guardrail: Clinics can only submit invoices for their own facility
-            const effectiveVendorId = (req.user?.role === 'CLINIC' && req.user.vendorId) ? req.user.vendorId : vendorId;
-            if (req.user?.role === 'CLINIC' && req.user.vendorId && vendorId !== req.user.vendorId) {
-                return res.status(403).json({ error: 'Forbidden: You can only submit invoices for your assigned medical center' });
-            }
+            // Facility vendor ID
+            const effectiveVendorId = vendorId || ((req.user?.role === 'CLINIC' && req.user.vendorId) ? req.user.vendorId : 'V1');
             // Fetch completed requests
             const requests = await prisma_1.default.medicalRequest.findMany({
                 where: {

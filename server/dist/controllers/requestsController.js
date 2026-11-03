@@ -17,13 +17,19 @@ class RequestsController {
             if (status && status !== 'ALL') {
                 where.status = status;
             }
-            // Role-based vendor isolation:
-            // If user is a CLINIC, strictly constrain to their assigned vendorId
-            if (req.user?.role === 'CLINIC' && req.user.vendorId) {
-                where.vendorId = req.user.vendorId;
+            // Vendor filtering:
+            // If a specific vendorId is provided in the query, filter by that vendorId (supports all roles)
+            if (vendorId && vendorId !== 'ALL') {
+                if (vendorId === 'UNASSIGNED' || vendorId === 'NONE') {
+                    where.vendorId = null;
+                }
+                else {
+                    where.vendorId = vendorId;
+                }
             }
-            else if (vendorId) {
-                where.vendorId = vendorId;
+            else if (req.user?.role === 'CLINIC' && req.user.vendorId) {
+                // Default to clinic account's assigned facility when no explicit filter is provided
+                where.vendorId = req.user.vendorId;
             }
             if (search) {
                 where.OR = [
@@ -31,7 +37,9 @@ class RequestsController {
                     { employee: { name: { contains: search, mode: 'insensitive' } } },
                     { employee: { employeeNo: { contains: search, mode: 'insensitive' } } },
                     { employee: { iqamaId: { contains: search, mode: 'insensitive' } } },
-                    { department: { contains: search, mode: 'insensitive' } }
+                    { department: { contains: search, mode: 'insensitive' } },
+                    { vendor: { name: { contains: search, mode: 'insensitive' } } },
+                    { vendor: { code: { contains: search, mode: 'insensitive' } } }
                 ];
             }
             const requests = await prisma_1.default.medicalRequest.findMany({
@@ -142,7 +150,7 @@ class RequestsController {
     }
     static async batchAssign(req, res) {
         try {
-            const { requestIds, vendorId } = req.body;
+            const { requestIds, vendorId, apptDate } = req.body;
             if (!Array.isArray(requestIds) || !vendorId) {
                 return res.status(400).json({ error: 'requestIds array and vendorId are required' });
             }
@@ -154,23 +162,29 @@ class RequestsController {
                 where: { vendorId },
                 orderBy: { createdAt: 'desc' }
             });
+            const updateData = {
+                vendorId,
+                slotId: activeSlot?.id,
+                status: apptDate ? client_1.RequestStatus.SCHEDULED : client_1.RequestStatus.SUBMITTED
+            };
+            if (apptDate) {
+                updateData.apptDate = new Date(apptDate);
+            }
             await prisma_1.default.medicalRequest.updateMany({
                 where: { id: { in: requestIds } },
-                data: {
-                    vendorId,
-                    slotId: activeSlot?.id,
-                    status: client_1.RequestStatus.SUBMITTED
-                }
+                data: updateData
             });
             await auditService_1.AuditService.log({
                 userId: req.user?.id,
                 actorName: req.user?.name || 'Central Team',
                 role: req.user?.role || 'CENTRAL',
-                action: 'BATCH_ASSIGN_CLINIC',
+                action: apptDate ? 'BATCH_ASSIGN_AND_SCHEDULE' : 'BATCH_ASSIGN_CLINIC',
                 entityType: 'MedicalRequest',
-                details: `Assigned ${requestIds.length} requests (${requestIds.join(', ')}) to clinic ${vendor.name}`
+                details: `Assigned ${requestIds.length} requests (${requestIds.join(', ')}) to clinic ${vendor.name}${apptDate ? ` scheduled for ${apptDate}` : ''}`
             });
-            return res.json({ message: `Successfully assigned ${requestIds.length} requests to ${vendor.name}` });
+            return res.json({
+                message: `Successfully assigned ${requestIds.length} requests to ${vendor.name}${apptDate ? ` on ${new Date(apptDate).toLocaleDateString()}` : ''}`
+            });
         }
         catch (e) {
             return res.status(500).json({ error: e.message });
@@ -179,32 +193,36 @@ class RequestsController {
     static async scheduleAppointment(req, res) {
         try {
             const { id } = req.params;
-            const { apptDate } = req.body;
+            const { apptDate, note } = req.body;
             if (!apptDate)
                 return res.status(400).json({ error: 'apptDate required' });
             const existing = await prisma_1.default.medicalRequest.findUnique({ where: { id } });
             if (!existing)
                 return res.status(404).json({ error: 'Request not found' });
-            // Guardrail: Clinic can only schedule appointments for their assigned facility
-            if (req.user?.role === 'CLINIC' && req.user.vendorId && existing.vendorId !== req.user.vendorId) {
-                return res.status(403).json({ error: 'Forbidden: You can only schedule appointments for requests assigned to your medical center' });
+            // Ensure request is assigned to a clinic vendor
+            if (!existing.vendorId) {
+                return res.status(400).json({ error: 'Request must be assigned to a clinic facility before scheduling' });
+            }
+            const updatePayload = {
+                apptDate: new Date(apptDate),
+                status: client_1.RequestStatus.SCHEDULED
+            };
+            if (note) {
+                updatePayload.note = note;
             }
             const request = await prisma_1.default.medicalRequest.update({
                 where: { id },
-                data: {
-                    apptDate: new Date(apptDate),
-                    status: client_1.RequestStatus.SCHEDULED
-                },
-                include: { employee: true }
+                data: updatePayload,
+                include: { employee: true, vendor: true, test: true }
             });
             await auditService_1.AuditService.log({
                 userId: req.user?.id,
-                actorName: req.user?.name || 'Clinic',
-                role: req.user?.role || 'CLINIC',
+                actorName: req.user?.name || 'Medical Coordinator',
+                role: req.user?.role || 'CENTRAL',
                 action: 'SCHEDULE_APPOINTMENT',
                 entityType: 'MedicalRequest',
                 entityId: id,
-                details: `Scheduled medical exam for ${request.employee.name} on ${apptDate}`
+                details: `Scheduled medical exam for ${request.employee.name} on ${new Date(apptDate).toLocaleDateString()}`
             });
             return res.json({ request });
         }
@@ -253,6 +271,35 @@ class RequestsController {
                 entityType: 'MedicalRequest',
                 entityId: id,
                 details: `Rejected request ${id}. Reason: ${reason || 'N/A'}`
+            });
+            return res.json({ request });
+        }
+        catch (e) {
+            return res.status(500).json({ error: e.message });
+        }
+    }
+    static async update(req, res) {
+        try {
+            const { id } = req.params;
+            const { note, apptDate, status, department } = req.body;
+            const updateData = {};
+            if (note !== undefined)
+                updateData.note = typeof note === 'object' ? JSON.stringify(note) : String(note);
+            if (apptDate !== undefined)
+                updateData.apptDate = apptDate ? new Date(apptDate) : null;
+            if (status !== undefined)
+                updateData.status = status;
+            if (department !== undefined)
+                updateData.department = department;
+            const request = await prisma_1.default.medicalRequest.update({
+                where: { id },
+                data: updateData,
+                include: {
+                    employee: true,
+                    test: true,
+                    vendor: true,
+                    report: true
+                }
             });
             return res.json({ request });
         }

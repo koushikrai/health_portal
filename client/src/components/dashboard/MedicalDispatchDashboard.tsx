@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { api } from '../../api/client';
 import { CertificateModal } from '../certificate/CertificateModal';
+import { PdfReportViewerModal } from '../certificate/PdfReportViewerModal';
 
 interface MedicalDispatchDashboardProps {
   userRole?: string;
@@ -172,6 +173,7 @@ interface ParsedCandidate {
   stageProgress: string;
   fitStatus: 'FIT' | 'CONDITIONAL' | 'UNFIT';
   validityTerm: string;
+  issueDate: string;
   expiryDate: string;
   targetCards: {
     iqama: boolean;
@@ -181,6 +183,7 @@ interface ParsedCandidate {
   };
   notes: string;
   labData: LabData;
+  pdfFileUrl?: string;
   rawRequest: any;
 }
 
@@ -190,6 +193,8 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
   onNavigateToTab
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'entry' | 'inbound' | 'slots' | 'invoice'>('entry');
+  const [viewMode, setViewMode] = useState<'table' | 'workspace'>('table');
+  const [tableSearch, setTableSearch] = useState<string>('');
   const [clinics, setClinics] = useState<ClinicRecord[]>([]);
   const [selectedVendorId, setSelectedVendorId] = useState<string>(vendorId || 'V1');
   const [requests, setRequests] = useState<any[]>([]);
@@ -214,6 +219,23 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
   const [issuingCard, setIssuingCard] = useState<boolean>(false);
   const [issuedSuccess, setIssuedSuccess] = useState<boolean>(false);
   const [issuanceReceipt, setIssuanceReceipt] = useState<string>('');
+
+  // PDF Viewer Modal State
+  const [selectedPdfReport, setSelectedPdfReport] = useState<any>(null);
+
+  // Bulk PDF Folder Upload State
+  const [isBulkUploadModalOpen, setIsBulkUploadModalOpen] = useState<boolean>(false);
+  const [selectedPdfFiles, setSelectedPdfFiles] = useState<File[]>([]);
+  const [bulkTestId, setBulkTestId] = useState<string>('5004972');
+  const [bulkIssueDate, setBulkIssueDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [bulkValidityMonths, setBulkValidityMonths] = useState<number>(24);
+  const [uploadingPdfs, setUploadingPdfs] = useState<boolean>(false);
+  const [uploadResult, setUploadResult] = useState<any>(null);
+  const [testsList, setTestsList] = useState<any[]>([]);
+
+  // File Input References
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Comprehensive Clinical Diagnostics Intake State
   const [isClinicalModalOpen, setIsClinicalModalOpen] = useState<boolean>(false);
@@ -260,8 +282,17 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
           setSelectedVendorId(defaultClinic.id);
         }
       }
+
+      // Fetch master test types for bulk upload selection
+      const testsRes = await api.getTests();
+      if (testsRes.data?.tests && Array.isArray(testsRes.data.tests)) {
+        setTestsList(testsRes.data.tests);
+        if (testsRes.data.tests.length > 0) {
+          setBulkTestId(testsRes.data.tests[0].id);
+        }
+      }
     } catch (e) {
-      console.error('Failed to fetch clinics:', e);
+      console.error('Failed to fetch clinics or tests:', e);
     }
   };
 
@@ -393,31 +424,28 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
 
       const labData = parseLabData(r);
       const recordedCount = getRecordedCount(labData);
+      const pdfFileUrl = rep.fileUrl || undefined;
+
+      const issueDateFormatted = rep.testDate
+        ? new Date(rep.testDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+        : new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
       let statusBadge: 'ACTIVE' | 'IN QUEUE' | 'EXP <= 42d' | 'DRAFT' | 'COMPLETED' = 'DRAFT';
-      let stageText = 'Stage: Awaiting Diagnostics';
-      let stageProgress = `${recordedCount}/6 Recorded`;
+      let stageText = pdfFileUrl ? 'Stage: PDF Certificate Attached' : 'Stage: Awaiting PDF Report';
+      let stageProgress = pdfFileUrl ? 'PDF Ready' : 'Awaiting File';
 
-      if (r.status === 'COMPLETED' || rep.result) {
+      if (r.status === 'COMPLETED' || rep.result || pdfFileUrl) {
         statusBadge = 'COMPLETED';
-        stageText = 'Stage: Certified & Synced';
-        stageProgress = '6/6 Complete';
-      } else if (recordedCount === 6) {
-        statusBadge = 'ACTIVE';
-        stageText = 'Stage: Ready for Doctor Sign-Off';
-        stageProgress = '6/6 Recorded';
-      } else if (recordedCount > 0) {
-        statusBadge = 'ACTIVE';
-        stageText = `Stage: Intake in Progress (${recordedCount}/6)`;
-        stageProgress = `${recordedCount}/6 Recorded`;
+        stageText = 'Stage: PDF Certificate Attached';
+        stageProgress = 'PDF Ready';
       } else if (r.status === 'SCHEDULED') {
         statusBadge = 'ACTIVE';
         stageText = 'Stage: Scheduled Intake';
-        stageProgress = '0/6 Recorded';
+        stageProgress = 'Awaiting File';
       } else if (r.status === 'SUBMITTED') {
         statusBadge = 'IN QUEUE';
         stageText = 'Stage: Inbound Queue';
-        stageProgress = '0/6 Recorded';
+        stageProgress = 'Awaiting File';
       }
 
       // Check for impending expiration
@@ -470,6 +498,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
         stageProgress,
         fitStatus: (rep.result as any) || 'FIT',
         validityTerm: '2 Years (Petro)',
+        issueDate: issueDateFormatted,
         expiryDate: expiryFormatted,
         targetCards: {
           iqama: true,
@@ -479,6 +508,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
         },
         notes: cleanNotes,
         labData,
+        pdfFileUrl,
         rawRequest: r
       };
     });
@@ -493,6 +523,21 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
     if (filterFitState === 'EXPIRING') return candidates.filter(c => c.statusBadge === 'EXP <= 42d');
     return candidates;
   }, [candidates, filterFitState]);
+
+  // Filtered table candidates (for the simplified 6-field report table)
+  const filteredTableCandidates = useMemo(() => {
+    let list = filteredCandidates;
+    if (tableSearch.trim()) {
+      const q = tableSearch.toLowerCase().trim();
+      list = list.filter(c =>
+        c.name.toLowerCase().includes(q) ||
+        c.iqamaId.toLowerCase().includes(q) ||
+        c.employeeNo.toLowerCase().includes(q) ||
+        c.protocol.toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [filteredCandidates, tableSearch]);
 
   // Active Selected Candidate
   const activeCandidate = useMemo(() => {
@@ -621,6 +666,58 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
       alert(`Failed to save diagnostic intake: ${e?.response?.data?.error || e.message}`);
     } finally {
       setSavingLab(false);
+    }
+  };
+
+  // 1. Single Candidate PDF Report Upload Handler
+  const handleSinglePdfUpload = async (candidate: ParsedCandidate, file: File) => {
+    try {
+      const formData = new FormData();
+      formData.append('files', file);
+      formData.append('vendorId', selectedVendorId);
+      formData.append('testId', candidate.rawRequest?.testId || bulkTestId);
+      formData.append('testDate', new Date().toISOString().slice(0, 10));
+      formData.append('validityMonths', '24');
+
+      const res = await api.uploadBatchReports(formData);
+      if (res.data?.matchedCount > 0) {
+        alert(`Successfully linked ${file.name} to ${candidate.name} (Iqama: ${candidate.iqamaId})!`);
+      } else if (res.data?.unmatchedCount > 0) {
+        alert(`Could not match ${file.name}: ${res.data.unmatched[0]?.reason}`);
+      }
+      await loadClinicData(selectedVendorId);
+    } catch (e: any) {
+      alert(`Upload failed: ${e?.response?.data?.error || e.message}`);
+    }
+  };
+
+  // 2. Bulk Folder / Multi-PDF Ingestion Handler (Matches by Iqama in filename)
+  const handleBulkUpload = async () => {
+    if (selectedPdfFiles.length === 0) {
+      alert('Please select a folder or PDF files to upload.');
+      return;
+    }
+
+    setUploadingPdfs(true);
+    setUploadResult(null);
+
+    try {
+      const formData = new FormData();
+      selectedPdfFiles.forEach((file) => {
+        formData.append('files', file);
+      });
+      formData.append('vendorId', selectedVendorId);
+      formData.append('testId', bulkTestId);
+      formData.append('testDate', bulkIssueDate);
+      formData.append('validityMonths', String(bulkValidityMonths));
+
+      const res = await api.uploadBatchReports(formData);
+      setUploadResult(res.data);
+      await loadClinicData(selectedVendorId);
+    } catch (e: any) {
+      alert(`Bulk upload failed: ${e?.response?.data?.error || e.message}`);
+    } finally {
+      setUploadingPdfs(false);
     }
   };
 
@@ -941,7 +1038,45 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 </span>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Bulk Folder / Multi-PDF Upload Action Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPdfFiles([]);
+                    setUploadResult(null);
+                    setIsBulkUploadModalOpen(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary hover:bg-slate-900 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[17px]">drive_folder_upload</span>
+                  <span>Upload Folder of Reports (by Iqama #)</span>
+                </button>
+
+                {/* View Mode Toggle: Simplified 6-Field Table vs Clearance Workspace */}
+                <div className="flex items-center p-0.5 rounded-xl bg-slate-100 border border-slate-200 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('table')}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                      viewMode === 'table' ? 'bg-white text-primary shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[15px]">table_rows</span>
+                    <span>Reports Table (6 Fields)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('workspace')}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                      viewMode === 'workspace' ? 'bg-white text-primary shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[15px]">view_agenda</span>
+                    <span>Clearance Workspace</span>
+                  </button>
+                </div>
+
                 {/* Fit State Filter */}
                 <select
                   value={filterFitState}
@@ -957,7 +1092,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
 
                 <button
                   onClick={() => loadClinicData(selectedVendorId)}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer border border-slate-200"
                 >
                   <span className="material-symbols-outlined text-[16px]">refresh</span>
                   <span>Refresh Queue</span>
@@ -965,13 +1100,163 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
               </div>
             </div>
 
-            {/* Candidate Cards Grid */}
-            {filteredCandidates.length === 0 ? (
-              <div className="py-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                <p className="text-sm font-semibold">No candidates found in this queue.</p>
-                <p className="text-xs text-slate-400 mt-1">Switch clinic facility above or submit new clearance requests.</p>
+            {/* SIMPLIFIED 6-FIELD REPORTS TABLE (NAME, REPORT NAME, IQAMA #, ISSUE DATE, EXPIRY DATE, MEDICAL CENTER + VIEW PDF) */}
+            {viewMode === 'table' && (
+              <div className="space-y-3 pt-2">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+                  <div className="relative flex-1 max-w-sm">
+                    <span className="material-symbols-outlined absolute left-3 top-2 text-slate-400 text-[17px]">
+                      search
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Search candidate name, Iqama #, or report name..."
+                      value={tableSearch}
+                      onChange={(e) => setTableSearch(e.target.value)}
+                      className="w-full pl-9 pr-3 py-1 rounded-lg border border-slate-200 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-primary bg-white shadow-2xs"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                    <span>Showing <strong className="text-slate-800">{filteredTableCandidates.length}</strong> reports</span>
+                    <span className="text-slate-300">&bull;</span>
+                    <span className="text-emerald-700 font-bold">
+                      {filteredTableCandidates.filter(c => c.pdfFileUrl).length} PDFs attached
+                    </span>
+                  </div>
+                </div>
+
+                {filteredTableCandidates.length === 0 ? (
+                  <div className="py-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                    <p className="text-sm font-semibold">No medical reports match the search criteria.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50/90 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold tracking-wider">
+                        <tr>
+                          <th className="py-3 px-3.5">1. Employee Name</th>
+                          <th className="py-3 px-3.5">2. Name of Report</th>
+                          <th className="py-3 px-3.5">3. Iqama Number</th>
+                          <th className="py-3 px-3.5">4. Issue Date</th>
+                          <th className="py-3 px-3.5">5. Expiry Date</th>
+                          <th className="py-3 px-3.5">6. Medical Center Name</th>
+                          <th className="py-3 px-3.5 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium">
+                        {filteredTableCandidates.map((c) => (
+                          <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
+                            {/* 1. Name */}
+                            <td className="py-3 px-3.5">
+                              <div className="flex items-center gap-2.5">
+                                <span className="h-7 w-7 rounded-full bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0">
+                                  {c.initials}
+                                </span>
+                                <div>
+                                  <div className="font-bold text-slate-900">{c.name}</div>
+                                  <div className="text-[11px] text-slate-400 font-mono">SAP: {c.employeeNo}</div>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* 2. Name of Report */}
+                            <td className="py-3 px-3.5">
+                              <div className="font-semibold text-slate-800">{c.protocol}</div>
+                              <div className="text-[10px] text-slate-400">Occupational Fitness Protocol</div>
+                            </td>
+
+                            {/* 3. Iqama Number */}
+                            <td className="py-3 px-3.5">
+                              <span className="font-mono font-bold text-primary bg-primary/5 px-2 py-0.5 rounded border border-primary/20">
+                                {c.iqamaId}
+                              </span>
+                            </td>
+
+                            {/* 4. Issue Date */}
+                            <td className="py-3 px-3.5 font-mono text-slate-700">
+                              {c.issueDate}
+                            </td>
+
+                            {/* 5. Expiry Date */}
+                            <td className="py-3 px-3.5 font-mono">
+                              <span className="font-bold text-emerald-700">
+                                {c.expiryDate}
+                              </span>
+                            </td>
+
+                            {/* 6. Medical Center Name */}
+                            <td className="py-3 px-3.5">
+                              <div className="font-bold text-slate-800">{c.rawRequest?.vendor?.name || currentClinic.name}</div>
+                              <div className="text-[10px] text-slate-400">CR: {currentClinic.crNumber}</div>
+                            </td>
+
+                            {/* Actions: View PDF / Single Upload */}
+                            <td className="py-3 px-3.5 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                {c.pdfFileUrl ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedPdfReport({
+                                          employeeName: c.name,
+                                          reportName: c.protocol,
+                                          iqamaNumber: c.iqamaId,
+                                          issueDate: c.issueDate,
+                                          expiryDate: c.expiryDate,
+                                          clinicName: currentClinic.name,
+                                          pdfUrl: c.pdfFileUrl
+                                        });
+                                      }}
+                                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary hover:bg-slate-900 text-white font-bold text-xs transition-all shadow-xs cursor-pointer"
+                                    >
+                                      <span className="material-symbols-outlined text-[15px] text-red-300">picture_as_pdf</span>
+                                      <span>View PDF</span>
+                                    </button>
+                                    <a
+                                      href={c.pdfFileUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      title="Open in new window"
+                                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
+                                    >
+                                      <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                                    </a>
+                                  </>
+                                ) : (
+                                  <label className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors cursor-pointer border border-slate-200">
+                                    <span className="material-symbols-outlined text-[15px] text-primary">upload_file</span>
+                                    <span>Upload PDF</span>
+                                    <input
+                                      type="file"
+                                      accept=".pdf"
+                                      className="hidden"
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) handleSinglePdfUpload(c, file);
+                                      }}
+                                    />
+                                  </label>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-            ) : (
+            )}
+
+            {/* Candidate Cards Grid (Shown in Clearance Workspace view) */}
+            {viewMode === 'workspace' && (
+              filteredCandidates.length === 0 ? (
+                <div className="py-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  <p className="text-sm font-semibold">No candidates found in this queue.</p>
+                  <p className="text-xs text-slate-400 mt-1">Switch clinic facility above or submit new clearance requests.</p>
+                </div>
+              ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {filteredCandidates.map((c) => {
                   const isSelected = c.id === activeCandidate?.id;
@@ -1035,11 +1320,11 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                   );
                 })}
               </div>
-            )}
+            ))}
           </div>
 
           {/* ACTIVE CANDIDATE WORKSPACE: 7 COLS (RESULTS) + 5 COLS (ISSUANCE) */}
-          {activeCandidate && (
+          {viewMode === 'workspace' && activeCandidate && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
               {/* LEFT 7 COLS: PATIENT PROFILE + TEST MATRIX */}
               <div className="lg:col-span-7 space-y-5">
@@ -1109,340 +1394,240 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                   </div>
                 </div>
 
-                {/* Standard Occupational Protocol Panel */}
+                {/* Attached Medical Clearance Report & PDF Viewer (Simplified 6 Data Fields) */}
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
                     <div>
-                      <span className="text-[11px] uppercase tracking-wider text-slate-400 font-bold">
-                        Clinical Diagnostics Entry
-                      </span>
-                      <h3 className="font-display font-bold text-base text-slate-900">
-                        Standard Occupational Protocol Panel
-                      </h3>
+                      <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[20px] text-primary">description</span>
+                        <h3 className="font-display font-bold text-base text-slate-900">
+                          Medical Clearance Report
+                        </h3>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Matched by Iqama #{activeCandidate.iqamaId} &bull; Stored in Central Employee Registry
+                      </p>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      {getRecordedCount(activeCandidate.labData) === 6 ? (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 text-emerald-800 px-2.5 py-1 text-xs font-bold">
-                          <span className="material-symbols-outlined text-[15px]">done_all</span>
-                          <span>All 6 Panels Ingested</span>
-                        </span>
-                      ) : getRecordedCount(activeCandidate.labData) > 0 ? (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 text-amber-800 px-2.5 py-1 text-xs font-bold">
-                          <span className="material-symbols-outlined text-[15px]">pending</span>
-                          <span>In Progress: {getRecordedCount(activeCandidate.labData)}/6 Recorded</span>
+                    <div className="flex items-center gap-2">
+                      {activeCandidate.pdfFileUrl ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-bold">
+                          <span className="material-symbols-outlined text-[16px] text-emerald-600">verified</span>
+                          <span>PDF Report Ingested</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 text-slate-600 px-2.5 py-1 text-xs font-bold border border-slate-200">
-                          <span className="material-symbols-outlined text-[15px]">pending_actions</span>
-                          <span>Awaiting Clinical Entry (0/6)</span>
+                        <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-100 text-amber-800 px-3 py-1 text-xs font-bold">
+                          <span className="material-symbols-outlined text-[16px] text-amber-600">pending</span>
+                          <span>Awaiting PDF Upload</span>
                         </span>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={handleLoadStandardBaseline}
-                        title="Fast-populate standard normal baseline for healthy worker intake"
-                        className="flex items-center gap-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer border border-slate-200"
-                      >
-                        <span className="material-symbols-outlined text-[15px]">input</span>
-                        <span>Import Baseline</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveLabForm(JSON.parse(JSON.stringify(activeCandidate.labData)));
-                          setIsClinicalModalOpen(true);
-                        }}
-                        className="flex items-center gap-1 rounded-lg bg-primary hover:bg-slate-900 text-white px-3 py-1 text-xs font-bold shadow-xs transition-colors cursor-pointer"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">clinical_notes</span>
-                        <span>{getRecordedCount(activeCandidate.labData) === 0 ? 'Enter Diagnostics' : 'Edit Diagnostics'}</span>
-                      </button>
+                      {activeCandidate.pdfFileUrl && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedPdfReport({
+                              employeeName: activeCandidate.name,
+                              reportName: activeCandidate.protocol,
+                              iqamaNumber: activeCandidate.iqamaId,
+                              issueDate: activeCandidate.issueDate,
+                              expiryDate: activeCandidate.expiryDate,
+                              clinicName: currentClinic.name,
+                              pdfUrl: activeCandidate.pdfFileUrl
+                            });
+                          }}
+                          className="flex items-center gap-1.5 rounded-lg bg-primary hover:bg-slate-900 text-white px-3.5 py-1 text-xs font-bold transition-all cursor-pointer shadow-xs"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">visibility</span>
+                          <span>View PDF</span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* 1. CBC & Serum Chemistry (Roche Cobas 6000) */}
-                  <div className="rounded-xl border border-slate-200/80 overflow-hidden bg-slate-50/50">
-                    <div className="px-4 py-2.5 bg-slate-100/80 flex items-center justify-between border-b border-slate-200/80">
-                      <div className="flex items-center gap-2 text-slate-800 font-bold text-xs">
-                        <span className="material-symbols-outlined text-[18px] text-red-600">bloodtype</span>
-                        <span>1. CBC & Serum Chemistry (Roche Cobas 6000)</span>
-                      </div>
-                      <span className="text-[11px] text-slate-500">
-                        {isCbcRecorded(activeCandidate.labData.cbc)
-                          ? 'Analyzed: 09:12 AST • Tech: M. Tariq'
-                          : 'Awaiting blood draw & analyzer intake'}
+                  {/* Strictly the 6 Requested Fields */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {/* 1. Employee Name */}
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                        1. Employee Name
                       </span>
+                      <p className="font-bold text-sm text-slate-900 truncate">{activeCandidate.name}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">SAP: {activeCandidate.employeeNo}</p>
                     </div>
 
-                    <div className="p-3 overflow-x-auto">
-                      <table className="w-full text-left text-xs">
-                        <thead>
-                          <tr className="text-slate-400 text-[10.5px] uppercase font-bold tracking-wider border-b border-slate-200/60 pb-2">
-                            <th className="py-1.5 px-2">Parameter</th>
-                            <th className="py-1.5 px-2">Result Value</th>
-                            <th className="py-1.5 px-2">Reference Range</th>
-                            <th className="py-1.5 px-2">Diagnostic State</th>
-                            <th className="py-1.5 px-2 text-right">Trend</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 font-medium">
-                          <tr className="hover:bg-white/80 transition-colors">
-                            <td className="py-2 px-2 text-slate-800 font-bold">Fasting Blood Glucose</td>
-                            <td className="py-2 px-2 font-mono font-bold text-slate-900">
-                              {activeCandidate.labData.cbc.glucose || <span className="text-slate-400 font-normal italic">--</span>}
-                            </td>
-                            <td className="py-2 px-2 font-mono text-slate-500">70 - 100 mg/dL</td>
-                            <td className="py-2 px-2">
-                              {activeCandidate.labData.cbc.glucose ? (
-                                <span className="inline-flex items-center gap-1 rounded bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10.5px] font-bold">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>
-                                  NORMAL
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 rounded bg-slate-100 text-slate-500 px-2 py-0.5 text-[10.5px] font-bold">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
-                                  PENDING
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2 px-2 text-right text-emerald-600">
-                              {activeCandidate.labData.cbc.glucose ? (
-                                <span className="material-symbols-outlined text-[16px]">trending_flat</span>
-                              ) : (
-                                <span className="text-slate-300">-</span>
-                              )}
-                            </td>
-                          </tr>
+                    {/* 2. Name of Report */}
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                        2. Name of Report
+                      </span>
+                      <p className="font-bold text-sm text-slate-900 truncate">{activeCandidate.protocol}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Occupational Fitness Protocol</p>
+                    </div>
 
-                          <tr className="hover:bg-white/80 transition-colors">
-                            <td className="py-2 px-2 text-slate-800 font-bold">Hemoglobin (Hb)</td>
-                            <td className="py-2 px-2 font-mono font-bold text-slate-900">
-                              {activeCandidate.labData.cbc.hemoglobin || <span className="text-slate-400 font-normal italic">--</span>}
-                            </td>
-                            <td className="py-2 px-2 font-mono text-slate-500">13.8 - 17.2 g/dL</td>
-                            <td className="py-2 px-2">
-                              {activeCandidate.labData.cbc.hemoglobin ? (
-                                <span className="inline-flex items-center gap-1 rounded bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10.5px] font-bold">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>
-                                  OPTIMAL
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 rounded bg-slate-100 text-slate-500 px-2 py-0.5 text-[10.5px] font-bold">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
-                                  PENDING
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2 px-2 text-right text-emerald-600">
-                              {activeCandidate.labData.cbc.hemoglobin ? (
-                                <span className="material-symbols-outlined text-[16px]">trending_up</span>
-                              ) : (
-                                <span className="text-slate-300">-</span>
-                              )}
-                            </td>
-                          </tr>
+                    {/* 3. Iqama Number */}
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                        3. Iqama Number
+                      </span>
+                      <p className="font-mono font-bold text-sm text-primary">{activeCandidate.iqamaId}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">10-Digit Muqeem / National ID</p>
+                    </div>
 
-                          <tr className="hover:bg-white/80 transition-colors">
-                            <td className="py-2 px-2 text-slate-800 font-bold">Total Cholesterol</td>
-                            <td className="py-2 px-2 font-mono font-bold text-slate-900">
-                              {activeCandidate.labData.cbc.cholesterol || <span className="text-slate-400 font-normal italic">--</span>}
-                            </td>
-                            <td className="py-2 px-2 font-mono text-slate-500">&lt; 200 mg/dL</td>
-                            <td className="py-2 px-2">
-                              {activeCandidate.labData.cbc.cholesterol ? (
-                                <span className="inline-flex items-center gap-1 rounded bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10.5px] font-bold">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>
-                                  NORMAL
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 rounded bg-slate-100 text-slate-500 px-2 py-0.5 text-[10.5px] font-bold">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
-                                  PENDING
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2 px-2 text-right text-slate-400">
-                              {activeCandidate.labData.cbc.cholesterol ? (
-                                <span className="material-symbols-outlined text-[16px]">trending_flat</span>
-                              ) : (
-                                <span className="text-slate-300">-</span>
-                              )}
-                            </td>
-                          </tr>
+                    {/* 4. Issue Date */}
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                        4. Issue Date
+                      </span>
+                      <p className="font-mono font-bold text-sm text-slate-900">{activeCandidate.issueDate}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Clinical Examination Date</p>
+                    </div>
 
-                          <tr className="hover:bg-white/80 transition-colors">
-                            <td className="py-2 px-2 text-slate-800 font-bold">ALT / SGPT (Liver Enzyme)</td>
-                            <td className="py-2 px-2 font-mono font-bold text-slate-900">
-                              {activeCandidate.labData.cbc.alt || <span className="text-slate-400 font-normal italic">--</span>}
-                            </td>
-                            <td className="py-2 px-2 font-mono text-slate-500">7 - 56 U/L</td>
-                            <td className="py-2 px-2">
-                              {activeCandidate.labData.cbc.alt ? (
-                                <span className="inline-flex items-center gap-1 rounded bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10.5px] font-bold">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>
-                                  NORMAL
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 rounded bg-slate-100 text-slate-500 px-2 py-0.5 text-[10.5px] font-bold">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
-                                  PENDING
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2 px-2 text-right text-emerald-600">
-                              {activeCandidate.labData.cbc.alt ? (
-                                <span className="material-symbols-outlined text-[16px]">check</span>
-                              ) : (
-                                <span className="text-slate-300">-</span>
-                              )}
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
+                    {/* 5. Expiry Date */}
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                        5. Expiry Date
+                      </span>
+                      <p className="font-mono font-bold text-sm text-emerald-700">{activeCandidate.expiryDate}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Valid for Site Entry Pass</p>
+                    </div>
+
+                    {/* 6. Medical Center Name */}
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                        6. Medical Center / Clinic
+                      </span>
+                      <p className="font-bold text-sm text-slate-900 truncate">{currentClinic.name}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Accredited Healthcare Facility</p>
                     </div>
                   </div>
 
-                  {/* 2. Spirometry & Audiometry Baseline */}
-                  <div className="rounded-xl border border-slate-200/80 overflow-hidden bg-slate-50/50">
-                    <div className="px-4 py-2.5 bg-slate-100/80 flex items-center justify-between border-b border-slate-200/80">
-                      <div className="flex items-center gap-2 text-slate-800 font-bold text-xs">
-                        <span className="material-symbols-outlined text-[18px] text-sky-600">air</span>
-                        <span>2. Respiratory & Audiometric Baseline</span>
-                      </div>
-                      <span className="text-[11px] text-slate-500">NIOSH / OSHA Compliant</span>
-                    </div>
-
-                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="bg-white p-3.5 rounded-xl border border-slate-200/70 shadow-2xs">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-900 text-xs">Spirometry (PFT)</span>
-                          {isSpiroRecorded(activeCandidate.labData.spiro) ? (
-                            <span className="rounded bg-emerald-100 text-emerald-800 px-2 py-0.5 font-bold text-[10px]">
-                              FEV1/FVC: {activeCandidate.labData.spiro.fev1Fvc}
-                            </span>
-                          ) : (
-                            <span className="rounded bg-slate-100 text-slate-500 px-2 py-0.5 font-bold text-[10px]">
-                              Pending Intake
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-1 text-[11px] text-slate-500">
-                          {isSpiroRecorded(activeCandidate.labData.spiro) ? (
-                            `FVC: ${activeCandidate.labData.spiro.fvc} • FEV1: ${activeCandidate.labData.spiro.fev1}`
-                          ) : (
-                            <span className="text-slate-400 italic">Pulmonary function test not yet performed</span>
-                          )}
-                        </p>
-                        <div className="mt-2.5 flex items-center gap-2">
-                          <div className="h-2 flex-1 rounded-full bg-slate-200 overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${isSpiroRecorded(activeCandidate.labData.spiro) ? 'bg-emerald-500' : 'bg-slate-300'}`}
-                              style={{ width: isSpiroRecorded(activeCandidate.labData.spiro) ? '98%' : '0%' }}
-                            ></div>
+                  {/* PDF Document Viewer / Single Upload Dropzone */}
+                  <div className="mt-2">
+                    {activeCandidate.pdfFileUrl ? (
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                          <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-lg bg-red-100 text-red-700 flex items-center justify-center font-bold text-xs shrink-0">
+                              PDF
+                            </div>
+                            <div>
+                              <p className="font-mono font-bold text-xs text-slate-900">
+                                {activeCandidate.iqamaId}.pdf
+                              </p>
+                              <p className="text-[11px] text-slate-500">
+                                Attached to Employee #{activeCandidate.employeeNo} ({activeCandidate.name})
+                              </p>
+                            </div>
                           </div>
-                          <span className="font-mono text-[10px] text-slate-600 font-bold">
-                            {activeCandidate.labData.spiro.quality || 'Awaiting Test'}
-                          </span>
+
+                          <div className="flex items-center gap-2">
+                            <label className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-semibold cursor-pointer transition-colors">
+                              <span className="material-symbols-outlined text-[15px]">sync</span>
+                              <span>Replace</span>
+                              <input
+                                type="file"
+                                accept=".pdf"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) handleSinglePdfUpload(activeCandidate, file);
+                                }}
+                              />
+                            </label>
+                            <a
+                              href={activeCandidate.pdfFileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              download={`${activeCandidate.iqamaId}_medical_report.pdf`}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer transition-colors border border-slate-200"
+                            >
+                              <span className="material-symbols-outlined text-[15px]">download</span>
+                              <span>Download</span>
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPdfReport({
+                                  employeeName: activeCandidate.name,
+                                  reportName: activeCandidate.protocol,
+                                  iqamaNumber: activeCandidate.iqamaId,
+                                  issueDate: activeCandidate.issueDate,
+                                  expiryDate: activeCandidate.expiryDate,
+                                  clinicName: currentClinic.name,
+                                  pdfUrl: activeCandidate.pdfFileUrl
+                                });
+                              }}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary hover:bg-slate-900 text-white text-xs font-bold cursor-pointer transition-colors shadow-xs"
+                            >
+                              <span className="material-symbols-outlined text-[15px]">open_in_full</span>
+                              <span>Open PDF View</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Direct Embedded Preview Iframe */}
+                        <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-100 shadow-inner">
+                          <iframe
+                            src={activeCandidate.pdfFileUrl}
+                            title={`Medical Report - ${activeCandidate.name}`}
+                            className="w-full h-96 border-none"
+                          />
                         </div>
                       </div>
-
-                      <div className="bg-white p-3.5 rounded-xl border border-slate-200/70 shadow-2xs">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-900 text-xs">Audiogram Threshold</span>
-                          {isAudioRecorded(activeCandidate.labData.audio) ? (
-                            <span className="rounded bg-emerald-100 text-emerald-800 px-2 py-0.5 font-bold text-[10px]">
-                              Pass Grade A
-                            </span>
-                          ) : (
-                            <span className="rounded bg-slate-100 text-slate-500 px-2 py-0.5 font-bold text-[10px]">
-                              Pending Audiogram
-                            </span>
-                          )}
+                    ) : (
+                      <div className="border-2 border-dashed border-slate-300 hover:border-primary/50 bg-slate-50/70 hover:bg-slate-50 rounded-2xl p-6 text-center transition-all">
+                        <div className="mx-auto h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mb-3">
+                          <span className="material-symbols-outlined text-[28px]">upload_file</span>
                         </div>
-                        <p className="mt-1 text-[11px] text-slate-500 font-mono">
-                          {activeCandidate.labData.audio.threshold || (
-                            <span className="text-slate-400 italic font-sans">Awaiting hearing chamber test</span>
-                          )}
+                        <h4 className="font-bold text-sm text-slate-800">
+                          No PDF Attached for Iqama #{activeCandidate.iqamaId}
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                          Upload the medical report PDF for {activeCandidate.name}. You can also upload a folder of reports at once using the bulk button above.
                         </p>
-                        <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-500">
-                          <span>STS: {isAudioRecorded(activeCandidate.labData.audio) ? 'None' : '--'}</span>
-                          <span className="font-mono text-primary font-bold">
-                            {activeCandidate.labData.audio.status || 'Pending Intake'}
-                          </span>
+                        <div className="mt-4 flex items-center justify-center gap-3">
+                          <label className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary hover:bg-slate-900 text-white text-xs font-bold cursor-pointer transition-all shadow-sm">
+                            <span className="material-symbols-outlined text-[16px]">add_circle</span>
+                            <span>Upload {activeCandidate.iqamaId}.pdf</span>
+                            <input
+                              type="file"
+                              accept=".pdf"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) handleSinglePdfUpload(activeCandidate, file);
+                              }}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedPdfFiles([]);
+                              setUploadResult(null);
+                              setIsBulkUploadModalOpen(true);
+                            }}
+                            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer transition-all border border-slate-200"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">folder</span>
+                            <span>Upload Folder Instead</span>
+                          </button>
                         </div>
                       </div>
-                    </div>
-                  </div>
-
-                  {/* 3. Vision, Drug & Alcohol Screen, Radiologist Chest X-Ray */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div className="rounded-xl border border-slate-200/80 bg-slate-50 p-3.5">
-                      <div className="flex items-center gap-1.5 text-primary mb-1">
-                        <span className="material-symbols-outlined text-[17px]">visibility</span>
-                        <span className="font-bold text-xs text-slate-900">Vision & Ishihara</span>
-                      </div>
-                      <p className="font-mono font-bold text-slate-800 text-xs">
-                        {activeCandidate.labData.vision.snellen || <span className="text-slate-400 font-normal italic">Snellen: Pending</span>}
-                      </p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        {activeCandidate.labData.vision.ishihara || <span className="text-slate-400 italic">Ishihara: Pending</span>}
-                      </p>
-                      <span className={`mt-2 inline-block rounded px-2 py-0.5 text-[10px] font-bold ${
-                        isVisionRecorded(activeCandidate.labData.vision) ? 'bg-primary/10 text-primary' : 'bg-slate-200 text-slate-600'
-                      }`}>
-                        {activeCandidate.labData.vision.clearance || 'Awaiting Examination'}
-                      </span>
-                    </div>
-
-                    <div className="rounded-xl border border-slate-200/80 bg-slate-50 p-3.5">
-                      <div className="flex items-center gap-1.5 text-emerald-700 mb-1">
-                        <span className="material-symbols-outlined text-[17px]">science</span>
-                        <span className="font-bold text-xs text-slate-900">Drug & Alcohol Chain</span>
-                      </div>
-                      <p className="font-mono font-bold text-emerald-700 text-xs">
-                        {activeCandidate.labData.drug.panel || <span className="text-slate-400 font-normal italic">Panel: Awaiting Specimen</span>}
-                      </p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        {activeCandidate.labData.drug.alcohol || <span className="text-slate-400 italic">Breathalyzer: Pending</span>}
-                      </p>
-                      <span className={`mt-2 inline-block rounded px-2 py-0.5 text-[10px] font-bold ${
-                        isDrugRecorded(activeCandidate.labData.drug) ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
-                      }`}>
-                        {activeCandidate.labData.drug.compliance || 'Chain Open'}
-                      </span>
-                    </div>
-
-                    <div className="rounded-xl border border-slate-200/80 bg-slate-50 p-3.5">
-                      <div className="flex items-center gap-1.5 text-sky-700 mb-1">
-                        <span className="material-symbols-outlined text-[17px]">radiology</span>
-                        <span className="font-bold text-xs text-slate-900">Chest X-Ray PA View</span>
-                      </div>
-                      <p className="font-mono font-bold text-slate-800 text-xs">
-                        {activeCandidate.labData.xray.paView || <span className="text-slate-400 font-normal italic">PA View: Pending Film</span>}
-                      </p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        {activeCandidate.labData.xray.findings || <span className="text-slate-400 italic">Findings: Pending Read</span>}
-                      </p>
-                      <span className="mt-2 inline-block rounded bg-slate-200 text-slate-700 px-2 py-0.5 text-[10px] font-semibold">
-                        {activeCandidate.labData.xray.radiologist || 'Rad: Unassigned'}
-                      </span>
-                    </div>
+                    )}
                   </div>
 
                   {/* Physician Clearance Annotations */}
                   <div className="rounded-xl border border-slate-200/80 bg-slate-50 p-4">
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                      Physician Clearance Annotations (Transmitted to Yanpet Occupational Health Log)
+                      Physician Clearance Annotations & Medical Notes
                     </label>
                     <textarea
-                      rows={3}
+                      rows={2}
                       value={physicianRemarks}
                       onChange={(e) => setPhysicianRemarks(e.target.value)}
-                      className="w-full rounded-lg bg-white border border-slate-200 p-3 text-xs text-slate-800 leading-relaxed focus:outline-none focus:border-primary shadow-2xs resize-none"
-                      placeholder="Enter clinical examination notes..."
+                      className="w-full rounded-lg bg-white border border-slate-200 p-2.5 text-xs text-slate-800 leading-relaxed focus:outline-none focus:border-primary shadow-2xs resize-none"
+                      placeholder="Optional remarks or notes for this report..."
                     />
                   </div>
                 </div>
@@ -2578,6 +2763,297 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
             </div>
           </div>
         </div>
+      )}
+
+      {/* BULK PDF FOLDER UPLOAD MODAL (AUTO-MATCHES BY IQAMA # IN FILENAME) */}
+      {isBulkUploadModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6 space-y-5 my-8">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                    <span className="material-symbols-outlined text-[20px]">drive_folder_upload</span>
+                  </div>
+                  <h3 className="font-display font-extrabold text-lg text-slate-900">
+                    Upload Medical Reports (Folder or Multi-PDF)
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Upload PDF reports named after employee Iqama numbers (e.g., <span className="font-mono font-bold text-slate-800">2490184822.pdf</span>). The system matches each file to the corresponding employee and stores it in the database.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsBulkUploadModalOpen(false);
+                  setSelectedPdfFiles([]);
+                  setUploadResult(null);
+                }}
+                className="h-8 w-8 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            {/* Ingestion Parameters */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Accredited Medical Center</label>
+                <select
+                  value={selectedVendorId}
+                  onChange={(e) => setSelectedVendorId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-primary"
+                >
+                  {clinics.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Name of Report / Test Protocol</label>
+                <select
+                  value={bulkTestId}
+                  onChange={(e) => setBulkTestId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-primary"
+                >
+                  {testsList.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Issue Date</label>
+                <input
+                  type="date"
+                  value={bulkIssueDate}
+                  onChange={(e) => setBulkIssueDate(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-mono font-semibold text-slate-800 focus:outline-none focus:border-primary"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Validity Duration</label>
+                <select
+                  value={bulkValidityMonths}
+                  onChange={(e) => setBulkValidityMonths(Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-primary"
+                >
+                  <option value={12}>1 Year (12 Months)</option>
+                  <option value={24}>2 Years - Petrochemical Standard (24 Months)</option>
+                  <option value={36}>3 Years (36 Months)</option>
+                  <option value={6}>6 Months (Conditional)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Folder / Files Selection Buttons */}
+            <div className="space-y-3">
+              <input
+                ref={folderInputRef}
+                type="file"
+                multiple
+                {...({ webkitdirectory: '', directory: '' } as any)}
+                className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []).filter((f) =>
+                    f.name.toLowerCase().endsWith('.pdf')
+                  );
+                  setSelectedPdfFiles(files);
+                  setUploadResult(null);
+                }}
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  setSelectedPdfFiles(files);
+                  setUploadResult(null);
+                }}
+              />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => folderInputRef.current?.click()}
+                  className="p-4 rounded-xl border-2 border-dashed border-primary/40 hover:border-primary bg-primary/5 hover:bg-primary/10 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all"
+                >
+                  <span className="material-symbols-outlined text-[32px] text-primary">folder_open</span>
+                  <div className="text-center">
+                    <p className="font-bold text-xs text-primary">Select Entire Folder</p>
+                    <p className="text-[11px] text-slate-500">Auto-reads all PDFs inside the chosen directory</p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-4 rounded-xl border-2 border-dashed border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all"
+                >
+                  <span className="material-symbols-outlined text-[32px] text-slate-600">file_upload</span>
+                  <div className="text-center">
+                    <p className="font-bold text-xs text-slate-800">Select Multiple PDF Files</p>
+                    <p className="text-[11px] text-slate-500">Pick individual PDF documents via file browser</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Staged Files Preview */}
+            {selectedPdfFiles.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-800">
+                    Staged Files: <span className="text-primary">{selectedPdfFiles.length} PDFs</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPdfFiles([])}
+                    className="text-red-600 hover:text-red-700 font-semibold"
+                  >
+                    Clear All
+                  </button>
+                </div>
+
+                <div className="max-h-44 overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100 bg-slate-50">
+                  {selectedPdfFiles.map((file, idx) => {
+                    const matchIqama = file.name.match(/\b\d{10}\b/)?.[0];
+                    const matchedCandidate = candidates.find(c => c.iqamaId === matchIqama);
+
+                    return (
+                      <div key={idx} className="p-2.5 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="material-symbols-outlined text-[18px] text-red-500 shrink-0">
+                            picture_as_pdf
+                          </span>
+                          <span className="font-mono font-medium text-slate-800 truncate">{file.name}</span>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {matchIqama ? (
+                            <span className="font-mono text-[11px] bg-slate-200 px-2 py-0.5 rounded text-slate-800 font-bold">
+                              Iqama: {matchIqama}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold">
+                              No 10-digit Iqama in name
+                            </span>
+                          )}
+
+                          {matchedCandidate ? (
+                            <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold truncate max-w-[120px]">
+                              {matchedCandidate.name}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-sky-100 text-sky-800 px-2 py-0.5 rounded font-bold">
+                              DB Search
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Ingestion Results Banner */}
+            {uploadResult && (
+              <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50 text-xs space-y-2">
+                <div className="flex items-center gap-2 text-emerald-900 font-bold">
+                  <span className="material-symbols-outlined text-[20px] text-emerald-600">check_circle</span>
+                  <span>
+                    Batch Ingestion Result: {uploadResult.matchedCount} of {uploadResult.totalFiles} matched & stored!
+                  </span>
+                </div>
+
+                {uploadResult.unmatchedCount > 0 && (
+                  <div className="pt-2 border-t border-emerald-200/60 text-slate-700">
+                    <p className="font-bold text-amber-800 mb-1">
+                      {uploadResult.unmatchedCount} Unmatched Files:
+                    </p>
+                    <ul className="list-disc list-inside space-y-0.5 text-[11px] text-slate-600">
+                      {uploadResult.unmatched.map((u: any, idx: number) => (
+                        <li key={idx}>
+                          <span className="font-mono font-bold">{u.filename}</span>: {u.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsBulkUploadModalOpen(false);
+                  setSelectedPdfFiles([]);
+                  setUploadResult(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer transition-colors"
+              >
+                {uploadResult ? 'Done' : 'Cancel'}
+              </button>
+
+              {uploadResult ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsBulkUploadModalOpen(false);
+                    setSelectedPdfFiles([]);
+                    setUploadResult(null);
+                    setViewMode('table');
+                  }}
+                  className="px-5 py-2 rounded-xl bg-primary hover:bg-slate-900 text-white font-bold text-xs cursor-pointer transition-colors shadow-xs"
+                >
+                  View Reports in Table
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={uploadingPdfs || selectedPdfFiles.length === 0}
+                  onClick={handleBulkUpload}
+                  className={`px-5 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-2 shadow-xs transition-all ${
+                    uploadingPdfs || selectedPdfFiles.length === 0
+                      ? 'bg-slate-400 cursor-not-allowed'
+                      : 'bg-primary hover:bg-slate-900 cursor-pointer'
+                  }`}
+                >
+                  {uploadingPdfs && (
+                    <span className="material-symbols-outlined text-[16px] animate-spin">
+                      progress_activity
+                    </span>
+                  )}
+                  <span>
+                    {uploadingPdfs ? 'Ingesting to Database...' : `Upload & Link ${selectedPdfFiles.length} Reports`}
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EMBEDDED PDF REPORT VIEWER MODAL */}
+      {selectedPdfReport && (
+        <PdfReportViewerModal
+          report={selectedPdfReport}
+          onClose={() => setSelectedPdfReport(null)}
+        />
       )}
 
       {/* OFFICIAL CERTIFICATE MODAL */}

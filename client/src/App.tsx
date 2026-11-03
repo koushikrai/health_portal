@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from './components/layout/Sidebar';
 import { TopHeader } from './components/layout/TopHeader';
 import { DashboardView } from './views/DashboardView';
@@ -56,10 +57,16 @@ export const ROLE_CONFIGS: Record<string, RoleConfig> = {
 export function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [checkingAuth, setCheckingAuth] = useState<boolean>(true);
-  const [currentTab, setCurrentTab] = useState('dashboard');
   const [userRole, setUserRole] = useState('HR');
   const [userName, setUserName] = useState('Marcus Sterling');
   const [vendorId, setVendorId] = useState<string | null>(null);
+
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Extract current tab from real browser URL pathname (e.g. "/requests" -> "requests")
+  const currentPathSegment = location.pathname.replace(/^\//, '').split('/')[0] || '';
+  const currentTab = currentPathSegment || (ROLE_CONFIGS[userRole]?.defaultTab || 'dashboard');
 
   useEffect(() => {
     checkSession();
@@ -91,8 +98,8 @@ export function App() {
         setVendorId(res.data.user.vendorId || null);
 
         const allowed = ROLE_CONFIGS[res.data.user.role]?.allowedTabs || ['dashboard'];
-        if (!allowed.includes(currentTab)) {
-          setCurrentTab(ROLE_CONFIGS[res.data.user.role]?.defaultTab || 'dashboard');
+        if (currentPathSegment && !allowed.includes(currentPathSegment) && res.data.user.role !== 'ADMIN') {
+          navigate(`/${ROLE_CONFIGS[res.data.user.role]?.defaultTab || 'dashboard'}`, { replace: true });
         }
       } else {
         setIsAuthenticated(false);
@@ -111,9 +118,9 @@ export function App() {
     setUserName(user.name);
     setVendorId(user.vendorId || null);
     
-    // Auto-navigate to role's designated landing module
+    // Auto-navigate to role's designated landing module with real URL update
     const targetDefault = ROLE_CONFIGS[user.role]?.defaultTab || 'dashboard';
-    setCurrentTab(targetDefault);
+    navigate(`/${targetDefault}`, { replace: true });
   };
 
   const handleLogout = () => {
@@ -121,6 +128,10 @@ export function App() {
     setIsAuthenticated(false);
     setUserName('');
     setVendorId(null);
+  };
+
+  const handleSelectTab = (tabId: string) => {
+    navigate(`/${tabId}`);
   };
 
   const handleSwitchRole = async (targetRole: string, targetVendorId?: string) => {
@@ -133,16 +144,16 @@ export function App() {
         setVendorId(res.data.user.vendorId || null);
 
         const allowed = ROLE_CONFIGS[res.data.user.role]?.allowedTabs || ['dashboard'];
-        if (!allowed.includes(currentTab)) {
-          setCurrentTab(ROLE_CONFIGS[res.data.user.role]?.defaultTab || 'dashboard');
+        if (!allowed.includes(currentTab) && res.data.user.role !== 'ADMIN') {
+          navigate(`/${ROLE_CONFIGS[res.data.user.role]?.defaultTab || 'dashboard'}`);
         }
       }
     } catch (e) {
       console.error(e);
       setUserRole(targetRole);
       const allowed = ROLE_CONFIGS[targetRole]?.allowedTabs || ['dashboard'];
-      if (!allowed.includes(currentTab)) {
-        setCurrentTab(ROLE_CONFIGS[targetRole]?.defaultTab || 'dashboard');
+      if (!allowed.includes(currentTab) && targetRole !== 'ADMIN') {
+        navigate(`/${ROLE_CONFIGS[targetRole]?.defaultTab || 'dashboard'}`);
       }
     }
   };
@@ -180,10 +191,10 @@ export function App() {
 
   return (
     <div className="flex min-h-screen bg-surface">
-      {/* Dark Navy Sidebar */}
+      {/* Dark Navy Sidebar connected with real browser routes */}
       <Sidebar
         currentTab={currentTab}
-        onSelectTab={setCurrentTab}
+        onSelectTab={handleSelectTab}
         userRole={userRole}
         userName={userName}
         onSwitchRole={handleSwitchRole}
@@ -198,7 +209,7 @@ export function App() {
           userName={userName}
           onSwitchRole={handleSwitchRole}
           onLogout={handleLogout}
-          onNavigateToTab={setCurrentTab}
+          onNavigateToTab={handleSelectTab}
         />
 
         <main className="flex-1 overflow-y-auto">
@@ -207,27 +218,43 @@ export function App() {
               currentTab={currentTab}
               userRole={userRole}
               userName={userName}
-              onNavigateToTab={setCurrentTab}
+              onNavigateToTab={handleSelectTab}
               onSwitchRole={handleSwitchRole}
             />
           ) : (
-            <>
-              {currentTab === 'dashboard' && <DashboardView onNavigateToTab={setCurrentTab} />}
-              {currentTab === 'intake' && <IntakeView />}
-              {currentTab === 'requests' && <RequestsQueueView userRole={userRole} />}
-              {currentTab === 'reports' && <ReportsView />}
-              {currentTab === 'clinic' && (
-                <ClinicPortalView
-                  userRole={userRole}
-                  vendorId={vendorId}
-                  onNavigateToTab={setCurrentTab}
-                />
-              )}
-              {currentTab === 'finance' && <InvoiceClearanceView />}
-              {currentTab === 'suppliers' && <SuppliersView />}
-              {currentTab === 'audit' && <AuditLogView />}
-              {currentTab === 'admin' && <AdminView userRole={userRole} />}
-            </>
+            <Routes>
+              {/* Default landing redirect */}
+              <Route
+                path="/"
+                element={<Navigate to={`/${ROLE_CONFIGS[userRole]?.defaultTab || 'dashboard'}`} replace />}
+              />
+              <Route
+                path="/dashboard"
+                element={<DashboardView onNavigateToTab={handleSelectTab} />}
+              />
+              <Route path="/intake" element={<IntakeView />} />
+              <Route path="/requests" element={<RequestsQueueView userRole={userRole} />} />
+              <Route path="/reports" element={<ReportsView />} />
+              <Route
+                path="/clinic"
+                element={
+                  <ClinicPortalView
+                    userRole={userRole}
+                    vendorId={vendorId}
+                    onNavigateToTab={handleSelectTab}
+                  />
+                }
+              />
+              <Route path="/finance" element={<InvoiceClearanceView />} />
+              <Route path="/suppliers" element={<SuppliersView />} />
+              <Route path="/audit" element={<AuditLogView />} />
+              <Route path="/admin" element={<AdminView userRole={userRole} />} />
+              {/* Fallback to default */}
+              <Route
+                path="*"
+                element={<Navigate to={`/${ROLE_CONFIGS[userRole]?.defaultTab || 'dashboard'}`} replace />}
+              />
+            </Routes>
           )}
         </main>
       </div>

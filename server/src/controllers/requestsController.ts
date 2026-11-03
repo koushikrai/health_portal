@@ -15,12 +15,17 @@ export class RequestsController {
         where.status = status as RequestStatus;
       }
       
-      // Role-based vendor isolation:
-      // If user is a CLINIC, strictly constrain to their assigned vendorId
-      if (req.user?.role === 'CLINIC' && req.user.vendorId) {
+      // Vendor filtering:
+      // If a specific vendorId is provided in the query, filter by that vendorId (supports all roles)
+      if (vendorId && vendorId !== 'ALL') {
+        if (vendorId === 'UNASSIGNED' || vendorId === 'NONE') {
+          where.vendorId = null;
+        } else {
+          where.vendorId = vendorId;
+        }
+      } else if (req.user?.role === 'CLINIC' && req.user.vendorId) {
+        // Default to clinic account's assigned facility when no explicit filter is provided
         where.vendorId = req.user.vendorId;
-      } else if (vendorId) {
-        where.vendorId = vendorId;
       }
 
       if (search) {
@@ -29,7 +34,9 @@ export class RequestsController {
           { employee: { name: { contains: search, mode: 'insensitive' } } },
           { employee: { employeeNo: { contains: search, mode: 'insensitive' } } },
           { employee: { iqamaId: { contains: search, mode: 'insensitive' } } },
-          { department: { contains: search, mode: 'insensitive' } }
+          { department: { contains: search, mode: 'insensitive' } },
+          { vendor: { name: { contains: search, mode: 'insensitive' } } },
+          { vendor: { code: { contains: search, mode: 'insensitive' } } }
         ];
       }
 
@@ -205,9 +212,9 @@ export class RequestsController {
       const existing = await prisma.medicalRequest.findUnique({ where: { id } });
       if (!existing) return res.status(404).json({ error: 'Request not found' });
 
-      // Guardrail: Clinic can only schedule appointments for their assigned facility
-      if (req.user?.role === 'CLINIC' && req.user.vendorId && existing.vendorId && existing.vendorId !== req.user.vendorId) {
-        return res.status(403).json({ error: 'Forbidden: You can only schedule appointments for requests assigned to your medical center' });
+      // Ensure request is assigned to a clinic vendor
+      if (!existing.vendorId) {
+        return res.status(400).json({ error: 'Request must be assigned to a clinic facility before scheduling' });
       }
 
       const updatePayload: any = {

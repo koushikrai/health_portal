@@ -6,16 +6,26 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
 const routes_1 = __importDefault(require("./routes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
+// Ensure uploads directories exist
+const uploadsDir = path_1.default.join(__dirname, '../uploads');
+const reportsDir = path_1.default.join(uploadsDir, 'reports');
+if (!fs_1.default.existsSync(reportsDir)) {
+    fs_1.default.mkdirSync(reportsDir, { recursive: true });
+}
 app.use((0, cors_1.default)({
     origin: true,
     credentials: true
 }));
-app.use(express_1.default.json({ limit: '10mb' }));
-app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express_1.default.json({ limit: '50mb' }));
+app.use(express_1.default.urlencoded({ extended: true, limit: '50mb' }));
+// Static file serving for uploaded PDFs and certificates
+app.use('/uploads', express_1.default.static(uploadsDir));
 // Root endpoint
 app.get('/', (req, res) => {
     res.json({
@@ -39,6 +49,13 @@ app.use('/api', routes_1.default);
 app.use((err, req, res, next) => {
     console.error('Unhandled Server Error:', err);
     res.status(500).json({ error: err.message || 'Internal Server Error' });
+});
+// Guard against idle connection drops from Neon serverless pooler
+process.on('unhandledRejection', (reason) => {
+    console.warn('[Server Warning] Handled async rejection:', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+    console.warn('[Server Warning] Handled uncaught exception:', err?.message || err);
 });
 app.listen(PORT, () => {
     console.log(`[ECC Health Portal API] running on port ${PORT}`);

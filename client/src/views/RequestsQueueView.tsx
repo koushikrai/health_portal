@@ -17,9 +17,10 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
 
-  // Clinics for triage
+  // Clinics for triage & filtering
   const [clinics, setClinics] = useState<any[]>([]);
-  const [selectedClinicId, setSelectedClinicId] = useState<string>('V2');
+  const [selectedClinicId, setSelectedClinicId] = useState<string>('ALL');
+  const [clinicFilter, setClinicFilter] = useState<string>('ALL');
   const [triageApptDate, setTriageApptDate] = useState<string>('');
 
   // Appointment Scheduling Modal state
@@ -33,13 +34,18 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
   useEffect(() => {
     loadRequests();
     loadClinics();
-  }, [statusFilter]);
+  }, [statusFilter, clinicFilter]);
 
-  const loadRequests = async () => {
+  const loadRequests = async (overrideStatus?: string, overrideClinic?: string, overrideSearch?: string) => {
     try {
+      const activeStatus = overrideStatus !== undefined ? overrideStatus : statusFilter;
+      const activeClinic = overrideClinic !== undefined ? overrideClinic : clinicFilter;
+      const activeSearch = overrideSearch !== undefined ? overrideSearch : search;
+
       const res = await api.getRequests({
-        status: statusFilter,
-        search: search || undefined
+        status: activeStatus,
+        vendorId: activeClinic !== 'ALL' ? activeClinic : undefined,
+        search: activeSearch || undefined
       });
       setRequests(res.data.requests);
     } catch (e) {
@@ -56,9 +62,23 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
     }
   };
 
+  const clinicList = clinics.length > 0 ? clinics : [
+    { id: 'V1', code: 'BAK', name: 'Badr Al Khaleej Polyclinic Co.' },
+    { id: 'V2', code: 'GAMC', name: 'Gulf Asian Medical Centre' },
+    { id: 'V3', code: 'JMC', name: 'Jubail Medical Center' },
+    { id: 'V4', code: 'ARZ', name: 'Arrazi Medical Center' },
+    { id: 'V5', code: 'DINA', name: 'Dina Medical Center' }
+  ];
+
+  const displayedRequests = requests.filter(req => {
+    if (clinicFilter === 'ALL') return true;
+    if (clinicFilter === 'UNASSIGNED') return !req.vendorId;
+    return req.vendorId === clinicFilter || req.vendor?.code === clinicFilter;
+  });
+
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
-      setSelectedIds(requests.map(r => r.id));
+      setSelectedIds(displayedRequests.map(r => r.id));
     } else {
       setSelectedIds([]);
     }
@@ -74,10 +94,15 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
 
   const handleBatchAssign = async (vendorId: string) => {
     if (selectedIds.length === 0) return;
+    if (vendorId === 'ALL' || vendorId === 'UNASSIGNED') {
+      alert('Please choose a specific destination clinic (e.g. BAK, GAMC, ARZ, JMC, DINA) from the Target Clinic dropdown.');
+      return;
+    }
     try {
       await api.batchAssignRequests(selectedIds, vendorId, triageApptDate || undefined);
+      const targetObj = clinicList.find(c => c.id === vendorId);
       setToastMessage(
-        `Successfully assigned ${selectedIds.length} candidate(s)${triageApptDate ? ` & scheduled for ${new Date(triageApptDate).toLocaleDateString()}` : ''}!`
+        `Successfully assigned ${selectedIds.length} candidate(s) to ${targetObj ? targetObj.name : 'clinic'}${triageApptDate ? ` & scheduled for ${new Date(triageApptDate).toLocaleDateString()}` : ''}!`
       );
       setTimeout(() => setToastMessage(''), 5000);
       setSelectedIds([]);
@@ -205,19 +230,20 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
             <div className="flex flex-wrap items-center gap-2.5">
               <span className="text-[11px] font-bold uppercase text-slate-300">Target Clinic:</span>
               
-              {/* Dynamic Dropdown with All 5 Accredited Clinics */}
+              {/* Dynamic Dropdown with All 5 Accredited Clinics + Filter Sync */}
               <select
                 value={selectedClinicId}
-                onChange={(e) => setSelectedClinicId(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedClinicId(val);
+                  setClinicFilter(val);
+                }}
                 className="bg-[#0B1020] text-white text-xs font-semibold px-3 py-2 rounded-xl border border-slate-700 focus:outline-none focus:border-secondary cursor-pointer"
+                title="Select a target clinic to filter the queue or batch assign selected requests"
               >
-                {(clinics.length > 0 ? clinics : [
-                  { id: 'V2', code: 'GAMC', name: 'Gulf Asian Medical Centre' },
-                  { id: 'V1', code: 'BAK', name: 'Badr Al Khaleej Polyclinic Co.' },
-                  { id: 'V3', code: 'JMC', name: 'Jubail Medical Center' },
-                  { id: 'V4', code: 'ARZ', name: 'Arrazi Medical Center' },
-                  { id: 'V5', code: 'DINA', name: 'Dina Medical Center' }
-                ]).map(c => (
+                <option value="ALL">All Accredited Clinics</option>
+                <option value="UNASSIGNED">Unassigned / Pending Triage</option>
+                {clinicList.map(c => (
                   <option key={c.id} value={c.id}>
                     {c.code} — {c.name}
                   </option>
@@ -256,24 +282,69 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
 
       {/* Table Container */}
       <div className="bg-white border border-slate-200/90 rounded-2xl shadow-sm overflow-hidden">
-        {/* Table Search */}
-        <div className="p-4 border-b border-slate-100 flex items-center justify-between gap-4 bg-slate-50/50">
-          <div className="relative flex-1 max-w-md">
-            <span className="material-symbols-outlined absolute left-3 top-2.5 text-slate-400 text-[18px]">search</span>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                loadRequests();
-              }}
-              placeholder="Filter by Request ID, employee, Iqama, department..."
-              className="w-full bg-white border border-slate-300 rounded-xl pl-10 pr-4 py-2 text-xs font-medium focus:outline-none focus:border-secondary shadow-sm"
-            />
+        {/* Table Search & Clinic Filter Toolbar */}
+        <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-50/50">
+          <div className="flex flex-1 flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            {/* Search Input */}
+            <div className="relative flex-1 max-w-md">
+              <span className="material-symbols-outlined absolute left-3 top-2.5 text-slate-400 text-[18px]">search</span>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  loadRequests(statusFilter, clinicFilter, e.target.value);
+                }}
+                placeholder="Filter by Request ID, employee, Iqama, department, clinic..."
+                className="w-full bg-white border border-slate-300 rounded-xl pl-10 pr-4 py-2 text-xs font-medium focus:outline-none focus:border-secondary shadow-sm"
+              />
+            </div>
+
+            {/* Dedicated Clinic Filter Dropdown */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">Clinic Filter:</span>
+              <select
+                value={clinicFilter}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setClinicFilter(val);
+                  setSelectedClinicId(val);
+                }}
+                className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary shadow-sm cursor-pointer"
+              >
+                <option value="ALL">All Clinics</option>
+                <option value="UNASSIGNED">Unassigned (Needs Triage)</option>
+                {clinicList.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.code} — {c.name}
+                  </option>
+                ))}
+              </select>
+
+              {clinicFilter !== 'ALL' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClinicFilter('ALL');
+                    setSelectedClinicId('ALL');
+                  }}
+                  className="text-[11px] font-bold text-secondary hover:underline cursor-pointer whitespace-nowrap"
+                >
+                  Clear Filter
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="text-xs text-slate-500 font-medium">
-            Showing <strong className="text-slate-800">{requests.length}</strong> records
+          <div className="text-xs text-slate-500 font-medium whitespace-nowrap flex items-center gap-2">
+            <span>
+              Showing <strong className="text-slate-800">{displayedRequests.length}</strong> records
+            </span>
+            {clinicFilter !== 'ALL' && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-secondary/15 text-secondary">
+                Filtered: {clinicFilter === 'UNASSIGNED' ? 'Unassigned' : (clinicList.find(c => c.id === clinicFilter)?.code || clinicFilter)}
+              </span>
+            )}
           </div>
         </div>
 
@@ -286,7 +357,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
                   <input
                     type="checkbox"
                     onChange={handleSelectAll}
-                    checked={selectedIds.length > 0 && selectedIds.length === requests.length}
+                    checked={displayedRequests.length > 0 && selectedIds.length === displayedRequests.length}
                     className="rounded text-secondary focus:ring-secondary cursor-pointer"
                   />
                 </th>
@@ -301,9 +372,20 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
-              {requests.map(req => {
-                const isSelected = selectedIds.includes(req.id);
-                return (
+              {displayedRequests.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="py-12 text-center text-slate-400">
+                    <span className="material-symbols-outlined text-4xl text-slate-300 block mb-2">filter_alt_off</span>
+                    <span className="font-bold text-slate-600 block">No clearance requests match this clinic filter</span>
+                    <span className="text-xs text-slate-400 mt-1 block">
+                      Try selecting "All Accredited Clinics" or clearing your search query.
+                    </span>
+                  </td>
+                </tr>
+              ) : (
+                displayedRequests.map(req => {
+                  const isSelected = selectedIds.includes(req.id);
+                  return (
                   <tr key={req.id} className={`hover:bg-slate-50/80 transition-colors ${isSelected ? 'bg-secondary/5' : ''}`}>
                     <td className="py-3 px-4">
                       <input
@@ -423,7 +505,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole }
                     </td>
                   </tr>
                 );
-              })}
+              }))}
             </tbody>
           </table>
         </div>

@@ -4,7 +4,7 @@ import { DashboardController } from '../controllers/dashboardController';
 import { EmployeeController } from '../controllers/employeeController';
 import { MastersController } from '../controllers/mastersController';
 import { RequestsController } from '../controllers/requestsController';
-import { ReportsController } from '../controllers/reportsController';
+import { ReportsController, uploadReportsMulter } from '../controllers/reportsController';
 import { InvoicesController } from '../controllers/invoicesController';
 import { AuditController } from '../controllers/auditController';
 import { AdminController } from '../controllers/adminController';
@@ -12,6 +12,11 @@ import { authenticate, requireRole } from '../middlewares/auth';
 import { Role } from '@prisma/client';
 
 const router = Router();
+
+// ==========================================
+// 0. System Telemetry & 3-Tier Health Check
+// ==========================================
+router.get('/health', DashboardController.getHealth);
 
 // ==========================================
 // 1. Authentication & Session Endpoints
@@ -105,6 +110,12 @@ router.post(
   authenticate,
   requireRole([Role.CLINIC]),
   ReportsController.submitResult
+);
+router.post(
+  '/reports/bulk-upload',
+  authenticate,
+  uploadReportsMulter.array('files', 150),
+  ReportsController.bulkUploadPdf
 );
 router.get('/reports/:id/certificate', authenticate, ReportsController.getCertificate);
 

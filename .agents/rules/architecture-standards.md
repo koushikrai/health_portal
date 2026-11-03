@@ -27,7 +27,19 @@ All features must strictly follow a 3-tier separation:
    - Relational database schema with strong foreign keys, integrity constraints, and indexes.
    - All mutations must be committed to the database.
 
-## 2. Expertise Mocha Design System (`https://expertise-mocha.vercel.app`)
+## 2. Browser URL Routing & Local Environment Invariants
+- **Browser URL Routing Standard**:
+  - NEVER implement core application views solely using in-memory state (e.g., `useState('tab')`) without URL synchronization.
+  - Always configure client-side routing (`react-router-dom`) with distinct paths (`/dashboard`, `/requests`, `/clinic`, `/finance`, etc.).
+  - Ensure the browser address bar reflects the active view, and that page reloads, browser back/forward buttons, and deep-link bookmarks are fully supported.
+- **Local Environment Backend Proxying**:
+  - In local development, configure the frontend build tool (`Vite` proxy) to route `/api` requests to the local backend port (`http://localhost:5000`).
+  - Do not set default `.env` to remote cloud servers (such as Render) during local development to ensure transparent local network logs and instant local response times.
+- **Dynamic Database Persistence**:
+  - Controllers must compute aggregations, volume distributions, and metrics directly from database models via the ORM (Prisma).
+  - Do not embed static mock data arrays inside controller responses.
+
+## 3. Expertise Mocha Design System (`https://expertise-mocha.vercel.app`)
 - **Fonts**: `Plus Jakarta Sans` (Display/Headings), `Inter` (Body text), `Material Symbols Outlined` (Icons).
 - **Color Tokens**:
   - Primary Navy: `#0A0F1D` (Sidebar), `#131B35` (Hero cards)

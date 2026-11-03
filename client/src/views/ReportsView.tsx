@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api/client';
 import { CertificateModal } from '../components/certificate/CertificateModal';
+import { PdfReportViewerModal } from '../components/certificate/PdfReportViewerModal';
 
 interface ReportsViewProps {
   onRenew?: (empNo: string, testId: string) => void;
@@ -12,6 +13,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onRenew }) => {
   const [resultFilter, setResultFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCertificate, setSelectedCertificate] = useState<any>(null);
+  const [selectedPdfReport, setSelectedPdfReport] = useState<any>(null);
 
   useEffect(() => {
     loadReports();
@@ -208,10 +210,30 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onRenew }) => {
 
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {report.fileUrl && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPdfReport({
+                                  employeeName: emp?.name || 'Employee',
+                                  reportName: report.test?.name || 'Occupational Medical Assessment',
+                                  iqamaNumber: emp?.iqamaId || emp?.employeeNo || '—',
+                                  issueDate: report.testDate ? report.testDate.slice(0, 10) : '—',
+                                  expiryDate: report.validUntil ? report.validUntil.slice(0, 10) : '—',
+                                  clinicName: report.vendor?.name || 'Accredited Medical Center',
+                                  pdfUrl: report.fileUrl
+                                });
+                              }}
+                              className="bg-primary hover:bg-slate-900 text-white font-bold text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+                            >
+                              <span className="material-symbols-outlined text-[15px] text-red-300">picture_as_pdf</span>
+                              <span>View PDF</span>
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => handleOpenCertificate(report.id)}
-                            className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer border border-slate-200"
                           >
                             <span className="material-symbols-outlined text-[15px]">badge</span>
                             <span>Certificate</span>
@@ -232,6 +254,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onRenew }) => {
         <CertificateModal
           certificate={selectedCertificate}
           onClose={() => setSelectedCertificate(null)}
+        />
+      )}
+
+      {/* Embedded PDF Report Viewer Modal */}
+      {selectedPdfReport && (
+        <PdfReportViewerModal
+          report={selectedPdfReport}
+          onClose={() => setSelectedPdfReport(null)}
         />
       )}
     </div>

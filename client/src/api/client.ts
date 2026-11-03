@@ -33,6 +33,9 @@ apiClient.interceptors.response.use(
 );
 
 export const api = {
+  // System Telemetry & Health
+  getHealth: () => apiClient.get('/health'),
+
   // Auth
   login: (data: { username: string; password: string }) => apiClient.post('/auth/login', data),
   me: () => apiClient.get('/auth/me'),
@@ -66,6 +69,9 @@ export const api = {
   getReports: (params?: { result?: string; search?: string }) => apiClient.get('/reports', { params }),
   submitReportResult: (data: any) => apiClient.post('/reports', data),
   getCertificate: (id: string) => apiClient.get(`/reports/${id}/certificate`),
+  uploadBatchReports: (formData: FormData) => apiClient.post('/reports/bulk-upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
 
   // Invoices
   getInvoices: (params?: { status?: string; vendorId?: string }) => apiClient.get('/invoices', { params }),
