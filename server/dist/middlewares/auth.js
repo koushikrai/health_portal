@@ -31,7 +31,8 @@ const authenticate = async (req, res, next) => {
             username: user.username,
             name: user.name,
             role: user.role,
-            vendorId: user.vendorId
+            vendorId: user.vendorId,
+            impersonatorId: decoded.impersonatorId || undefined
         };
         next();
     }
@@ -46,7 +47,7 @@ const requireRole = (allowedRoles) => {
             res.status(401).json({ error: 'Unauthorized: Authentication required' });
             return;
         }
-        if (req.user.role === client_1.Role.ADMIN || allowedRoles.includes(req.user.role)) {
+        if (req.user.role === client_1.Role.ADMIN || allowedRoles.includes(req.user.role) || (req.user.impersonatorId && allowedRoles.includes(client_1.Role.ADMIN))) {
             return next();
         }
         res.status(403).json({

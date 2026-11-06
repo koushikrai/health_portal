@@ -6,9 +6,22 @@ interface AdminViewProps {
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({ userRole }) => {
-  const [activeTab, setActiveTab] = useState<'users' | 'clinics' | 'matrix'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'clinics' | 'matrix' | 'settings'>('users');
   const [loading, setLoading] = useState<boolean>(true);
   const [stats, setStats] = useState<any>(null);
+
+  // System Settings & Slot Expiry Governance State
+  const [slotExpiryDays, setSlotExpiryDays] = useState<number>(7);
+  const [autoExpireSlots, setAutoExpireSlots] = useState<boolean>(true);
+  const [slotExpiryBasis, setSlotExpiryBasis] = useState<'CREATED_DATE' | 'NEED_BY_DATE'>('CREATED_DATE');
+  const [autoArchiveCompleted, setAutoArchiveCompleted] = useState<boolean>(true);
+  const [slotStats, setSlotStats] = useState<{ totalSlots: number; activeSlots: number; expiredSlots: number }>({
+    totalSlots: 0,
+    activeSlots: 0,
+    expiredSlots: 0
+  });
+  const [slotAuditList, setSlotAuditList] = useState<any[]>([]);
+  const [savingSettings, setSavingSettings] = useState<boolean>(false);
 
   // Users State
   const [users, setUsers] = useState<any[]>([]);
@@ -77,12 +90,25 @@ export const AdminView: React.FC<AdminViewProps> = ({ userRole }) => {
     setLoading(true);
     setFetchError('');
     try {
-      const [statsRes, usersRes, clinicsRes, testsRes] = await Promise.all([
+      const [statsRes, usersRes, clinicsRes, testsRes, settingsRes] = await Promise.all([
         api.admin.getOverview(),
         api.admin.getUsers(),
         api.getClinics(),
-        api.getTests()
+        api.getTests(),
+        api.admin.getSettings().catch(() => ({ data: null }))
       ]);
+      if (settingsRes?.data?.settings) {
+        setSlotExpiryDays(settingsRes.data.settings.slotExpiryDays || 7);
+        setAutoExpireSlots(settingsRes.data.settings.autoExpireSlots !== false);
+        setSlotExpiryBasis(settingsRes.data.settings.slotExpiryBasis || 'CREATED_DATE');
+        setAutoArchiveCompleted(settingsRes.data.settings.autoArchiveCompleted !== false);
+      }
+      if (settingsRes?.data?.stats) {
+        setSlotStats(settingsRes.data.stats);
+      }
+      if (settingsRes?.data?.slots) {
+        setSlotAuditList(settingsRes.data.slots);
+      }
       setStats(statsRes.data);
       setUsers(usersRes.data.users || []);
       setClinics(clinicsRes.data.clinics || []);
@@ -98,6 +124,45 @@ export const AdminView: React.FC<AdminViewProps> = ({ userRole }) => {
   const showNotification = (msg: string) => {
     setActionSuccess(msg);
     setTimeout(() => setActionSuccess(''), 6000);
+  };
+
+  const handleSaveSlotSettings = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    try {
+      setSavingSettings(true);
+      await api.admin.updateSettings({
+        slotExpiryDays: Number(slotExpiryDays),
+        autoExpireSlots,
+        slotExpiryBasis,
+        autoArchiveCompleted
+      });
+      showNotification(`Slot auto-disappearance window successfully set to ${slotExpiryDays} days!`);
+      loadAllAdminData();
+    } catch (e: any) {
+      setFetchError(e.response?.data?.error || 'Failed to save slot governance settings');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleExpireSlotNow = async (id: string) => {
+    try {
+      await api.admin.expireSlot(id);
+      showNotification(`Slot request ${id} manually expired — it will disappear from active allocation queue.`);
+      loadAllAdminData();
+    } catch (e: any) {
+      setFetchError(e.response?.data?.error || e.message);
+    }
+  };
+
+  const handleRestoreSlot = async (id: string) => {
+    try {
+      await api.admin.restoreSlot(id);
+      showNotification(`Slot request ${id} restored to active queue for ${slotExpiryDays} days.`);
+      loadAllAdminData();
+    } catch (e: any) {
+      setFetchError(e.response?.data?.error || e.message);
+    }
   };
 
   // ==========================================
@@ -415,6 +480,18 @@ export const AdminView: React.FC<AdminViewProps> = ({ userRole }) => {
           <span className="material-symbols-outlined text-[18px]">security</span>
           <span>Role Security Matrix & Guardrails</span>
         </button>
+
+        <button
+          onClick={() => setActiveTab('settings')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+            activeTab === 'settings'
+              ? 'border-secondary text-secondary'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <span className="material-symbols-outlined text-[18px]">timer</span>
+          <span>Slot Governance & Expiry (${slotExpiryDays}d)</span>
+        </button>
       </div>
 
       {/* ========================================================= */}
@@ -562,6 +639,315 @@ export const AdminView: React.FC<AdminViewProps> = ({ userRole }) => {
                         No users found matching search or role filter.
                       </td>
                     </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 4: SLOT GOVERNANCE & SYSTEM CONFIGURATION             */}
+      {/* ========================================================= */}
+      {activeTab === 'settings' && (
+        <div className="space-y-5">
+          {/* Module Banner */}
+          <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-teal-950 p-6 rounded-2xl border border-slate-800 text-white shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-amber-400 text-xs font-bold uppercase tracking-wider">
+                <span className="material-symbols-outlined text-[18px]">timer</span>
+                <span>System Automation & Queue Governance</span>
+              </div>
+              <h2 className="font-display font-extrabold text-xl text-white">
+                Advance Slot Auto-Disappearance Governance
+              </h2>
+              <p className="text-xs text-slate-300 max-w-2xl">
+                Configure the lifecycle window for advance pre-booked quota requests. When a slot request exceeds the configured duration, it automatically expires and disappears from the Central Medical Team Allocation Queue.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 bg-slate-800/80 px-4 py-3 rounded-xl border border-slate-700/80 shrink-0">
+              <span className="material-symbols-outlined text-amber-400 text-[26px]">hourglass_bottom</span>
+              <div>
+                <span className="block text-[10px] uppercase font-bold text-slate-400">Current Window</span>
+                <span className="font-display font-extrabold text-lg text-amber-300">
+                  {slotExpiryDays} Days
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Top 3 Impact Metrics */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500">Active Slots in Queue</span>
+                <span className="material-symbols-outlined text-emerald-600 text-[20px]">check_circle</span>
+              </div>
+              <div className="font-display font-extrabold text-2xl text-slate-900 mt-2">
+                {slotStats.activeSlots}
+              </div>
+              <span className="text-[11px] text-emerald-700 font-semibold mt-1 block">
+                Visible in Central Medical Team Queue
+              </span>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500">Disappeared / Expired Slots</span>
+                <span className="material-symbols-outlined text-rose-500 text-[20px]">event_busy</span>
+              </div>
+              <div className="font-display font-extrabold text-2xl text-slate-900 mt-2">
+                {slotStats.expiredSlots}
+              </div>
+              <span className="text-[11px] text-rose-600 font-semibold mt-1 block">
+                Automatically filtered out of active queue
+              </span>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500">Auto-Disappear Threshold</span>
+                <span className="material-symbols-outlined text-amber-600 text-[20px]">timer</span>
+              </div>
+              <div className="font-display font-extrabold text-2xl text-amber-600 mt-2">
+                {slotExpiryDays} Days
+              </div>
+              <span className="text-[11px] text-slate-500 font-semibold mt-1 block">
+                Configurable retention SLA
+              </span>
+            </div>
+          </div>
+
+          {/* CONFIGURATION CARD */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-5 lg:p-6 space-y-5">
+            <div className="border-b border-slate-100 pb-3">
+              <h3 className="font-display font-extrabold text-base text-slate-900">
+                Slot Disappearance Window Configuration
+              </h3>
+              <p className="text-xs text-slate-500">
+                Specify after how many days an unfulfilled or fulfilled slot pre-booking request should automatically disappear.
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveSlotSettings} className="space-y-5">
+              {/* Duration Input & Quick Presets */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-slate-800">
+                  Auto-Disappear Threshold (Days) *
+                </label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="relative w-36">
+                    <input
+                      type="number"
+                      min={1}
+                      max={90}
+                      required
+                      value={slotExpiryDays}
+                      onChange={(e) => setSlotExpiryDays(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-mono font-extrabold text-slate-900 focus:outline-none focus:border-secondary"
+                    />
+                    <span className="absolute right-3 top-2 text-xs font-bold text-slate-400 pointer-events-none">
+                      Days
+                    </span>
+                  </div>
+
+                  {/* Preset Pills */}
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    {[
+                      { label: '3 Days', value: 3 },
+                      { label: '5 Days', value: 5 },
+                      { label: '7 Days (Default)', value: 7 },
+                      { label: '14 Days', value: 14 },
+                      { label: '30 Days', value: 30 }
+                    ].map(preset => (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        onClick={() => setSlotExpiryDays(preset.value)}
+                        className={`px-3 py-1.5 rounded-xl font-bold border transition-all cursor-pointer ${
+                          slotExpiryDays === preset.value
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Requests created by HR more than <strong className="text-slate-800">{slotExpiryDays} days</strong> ago will automatically disappear from the Central Medical Team Allocation Queue.
+                </p>
+              </div>
+
+              {/* Toggles */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-100">
+                <div className="flex items-start gap-3 p-3.5 rounded-xl bg-slate-50/80 border border-slate-200">
+                  <input
+                    type="checkbox"
+                    id="autoExpireSlots"
+                    checked={autoExpireSlots}
+                    onChange={(e) => setAutoExpireSlots(e.target.checked)}
+                    className="mt-0.5 rounded text-secondary focus:ring-secondary cursor-pointer h-4 w-4"
+                  />
+                  <div className="space-y-0.5">
+                    <label htmlFor="autoExpireSlots" className="text-xs font-bold text-slate-800 cursor-pointer block">
+                      Enable Auto-Disappearance Filter
+                    </label>
+                    <p className="text-[11px] text-slate-500">
+                      When enabled, expired slot requests immediately disappear from the active allocation queue.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 p-3.5 rounded-xl bg-slate-50/80 border border-slate-200">
+                  <input
+                    type="checkbox"
+                    id="autoArchiveCompleted"
+                    checked={autoArchiveCompleted}
+                    onChange={(e) => setAutoArchiveCompleted(e.target.checked)}
+                    className="mt-0.5 rounded text-secondary focus:ring-secondary cursor-pointer h-4 w-4"
+                  />
+                  <div className="space-y-0.5">
+                    <label htmlFor="autoArchiveCompleted" className="text-xs font-bold text-slate-800 cursor-pointer block">
+                      Auto-Archive Confirmed Slots
+                    </label>
+                    <p className="text-[11px] text-slate-500">
+                      Fully allocated and confirmed slots also disappear {slotExpiryDays} days after confirmation.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-xs text-slate-400">
+                  Changes take effect immediately across all user sessions.
+                </span>
+
+                <button
+                  type="submit"
+                  disabled={savingSettings}
+                  className="bg-secondary hover:bg-orange-600 disabled:opacity-50 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[16px]">save</span>
+                  <span>{savingSettings ? 'Saving Settings...' : 'Save Slot Governance Settings'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* AUDIT TABLE: ACTIVE VS DISAPPEARED SLOTS */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <h3 className="font-display font-extrabold text-sm text-slate-900">
+                  Slot Lifecycle Audit Roster ({slotAuditList.length} Total Requests)
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Inspect the age and disappearance status of all advance slot pre-booking requests.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={loadAllAdminData}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 border border-slate-200"
+                >
+                  <span className="material-symbols-outlined text-[15px]">refresh</span>
+                  <span>Refresh Queue</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-400 uppercase text-[10px] font-bold tracking-wider">
+                  <tr>
+                    <th className="py-3 px-4">SLOT REQUEST ID</th>
+                    <th className="py-3 px-4">TITLE & FACILITY</th>
+                    <th className="py-3 px-3">DEPT</th>
+                    <th className="py-3 px-3">SLOTS</th>
+                    <th className="py-3 px-3">CREATED & AGE</th>
+                    <th className="py-3 px-4">GOVERNANCE LIFECYCLE</th>
+                    <th className="py-3 px-4 text-right">ADMIN ACTION</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium">
+                  {slotAuditList.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-xs text-slate-400 font-semibold">
+                        No slot requests recorded in database.
+                      </td>
+                    </tr>
+                  ) : (
+                    slotAuditList.map(slot => (
+                      <tr key={slot.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                          {slot.id}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="font-semibold text-slate-900">{slot.title}</div>
+                          <div className="text-[10px] text-slate-400 font-medium">{slot.plant || 'Main Facility'}</div>
+                        </td>
+                        <td className="py-3 px-3 font-semibold text-slate-700">
+                          {slot.department}
+                        </td>
+                        <td className="py-3 px-3">
+                          <span className="font-bold text-slate-800">{slot.requestedSlots}</span>
+                          <span className="text-[10px] text-slate-400 block font-normal">
+                            {slot.allocatedSlots} allocated
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-slate-600">
+                          <div>{new Date(slot.createdAt).toLocaleDateString('en-GB')}</div>
+                          <span className="text-[10px] font-mono text-slate-400">
+                            {slot.ageDays} {slot.ageDays === 1 ? 'day' : 'days'} old
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          {slot.isExpired ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                              <span className="material-symbols-outlined text-[13px]">event_busy</span>
+                              <span>Disappeared / Expired</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <span className="material-symbols-outlined text-[13px]">schedule</span>
+                              <span>Active &bull; Disappears in {slot.daysRemaining}d</span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {slot.isExpired ? (
+                              <button
+                                type="button"
+                                onClick={() => handleRestoreSlot(slot.id)}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-[10.5px] border border-emerald-200 cursor-pointer shadow-2xs transition-colors inline-flex items-center gap-1"
+                                title={`Restore this slot request to the active queue for another ${slotExpiryDays} days`}
+                              >
+                                <span className="material-symbols-outlined text-[13px]">replay</span>
+                                <span>Restore / Extend {slotExpiryDays}d</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleExpireSlotNow(slot.id)}
+                                className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-[10.5px] border border-rose-200 cursor-pointer shadow-2xs transition-colors inline-flex items-center gap-1"
+                                title="Force immediate expiration and disappearance from active queue"
+                              >
+                                <span className="material-symbols-outlined text-[13px]">block</span>
+                                <span>Expire Now</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
                   )}
                 </tbody>
               </table>

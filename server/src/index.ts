@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import routes from './routes';
+import prisma from './prisma';
 
 dotenv.config();
 
@@ -65,8 +66,25 @@ process.on('uncaughtException', (err: Error) => {
   console.warn('[Server Warning] Handled uncaught exception:', err?.message || err);
 });
 
-app.listen(PORT, () => {
-  console.log(`[ECC Health Portal API] running on port ${PORT}`);
-});
+// Neon Serverless compute keep-alive heartbeat to prevent auto-suspend 57P01 termination
+const HEARTBEAT_INTERVAL_MS = 120_000; // Every 2 minutes
+const heartbeatTimer = setInterval(async () => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+  } catch (err: any) {
+    console.warn('[DB Heartbeat] Reconnecting to Neon PostgreSQL:', err?.message || err);
+    try {
+      await prisma.$disconnect();
+      await prisma.$connect();
+    } catch (_) {}
+  }
+}, HEARTBEAT_INTERVAL_MS);
+heartbeatTimer.unref();
+
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`[ECC Health Portal API] running on port ${PORT}`);
+  });
+}
 
 export default app;

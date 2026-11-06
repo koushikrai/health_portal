@@ -9,6 +9,7 @@ export interface AuthUser {
   name: string;
   role: Role;
   vendorId?: string | null;
+  impersonatorId?: string;
 }
 
 declare global {
@@ -48,7 +49,8 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       username: user.username,
       name: user.name,
       role: user.role,
-      vendorId: user.vendorId
+      vendorId: user.vendorId,
+      impersonatorId: decoded.impersonatorId || undefined
     };
     next();
   } catch (error) {
@@ -63,7 +65,7 @@ export const requireRole = (allowedRoles: Role[]) => {
       return;
     }
 
-    if (req.user.role === Role.ADMIN || allowedRoles.includes(req.user.role)) {
+    if (req.user.role === Role.ADMIN || allowedRoles.includes(req.user.role) || (req.user.impersonatorId && allowedRoles.includes(Role.ADMIN))) {
       return next();
     }
 

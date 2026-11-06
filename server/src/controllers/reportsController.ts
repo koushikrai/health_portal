@@ -44,6 +44,12 @@ export class ReportsController {
         where.result = result as ReportResult;
       }
 
+      if (req.user?.role === 'CLINIC') {
+        where.vendorId = req.user.vendorId || '__NO_VENDOR__';
+      } else if (req.query.vendorId && req.query.vendorId !== 'ALL') {
+        where.vendorId = req.query.vendorId as string;
+      }
+
       if (search) {
         const s = String(search).trim();
         where.OR = [
@@ -87,9 +93,9 @@ export class ReportsController {
       if (!request) return res.status(404).json({ error: 'Request not found' });
       if (!request.vendorId) return res.status(400).json({ error: 'Request must be assigned to a clinic vendor before result entry' });
 
-      // Guardrail: Ensure request has an assigned clinic vendor
-      if (!request.vendorId) {
-        return res.status(400).json({ error: 'Request must be assigned to a clinic vendor before result entry' });
+      // Guardrail: Ensure clinic account can only submit for its own clinic
+      if (req.user?.role === 'CLINIC' && request.vendorId !== req.user.vendorId) {
+        return res.status(403).json({ error: 'Forbidden: Cannot submit medical report for another clinic' });
       }
 
       const tDate = testDate ? new Date(testDate) : new Date();
@@ -174,6 +180,11 @@ export class ReportsController {
 
       if (!report) return res.status(404).json({ error: 'Medical report not found' });
 
+      // Guardrail: Clinic user can only view reports issued by their assigned clinic
+      if (req.user?.role === 'CLINIC' && report.vendorId !== req.user.vendorId) {
+        return res.status(403).json({ error: 'Forbidden: Cannot view certificate issued by another clinic' });
+      }
+
       let physician = 'Dr. Tariq Al-Ghamdi, MD (Occupational Medicine)';
       let cleanRemarks = report.remarks || 'Clinically fit for deployment.';
       if (report.remarks && report.remarks.includes('[Examining Physician:')) {
@@ -245,52 +256,82 @@ export class ReportsController {
       const unmatched: any[] = [];
 
       for (const file of files) {
-        // Extract candidate Iqama number from filename (e.g. "2490184822.pdf" or "Iqama_2490184822.pdf")
-        const ext = path.extname(file.originalname);
-        const baseName = path.basename(file.originalname, ext);
-        const tenDigitMatch = baseName.match(/\b\d{10}\b/);
-        const iqamaCandidate = tenDigitMatch ? tenDigitMatch[0] : baseName.trim();
+        let request: any = null;
+        let employee: any = null;
+        let iqamaCandidate = (req.body.iqamaId && files.length === 1) ? String(req.body.iqamaId).trim() : '';
 
-        // Search for matching employee by iqamaId or employeeNo
-        const employee = await prisma.employee.findFirst({
-          where: {
-            OR: [
-              { iqamaId: iqamaCandidate },
-              { employeeNo: iqamaCandidate },
-              { id: iqamaCandidate }
-            ]
-          }
-        });
-
-        if (!employee) {
-          unmatched.push({
-            fileName: file.originalname,
-            extractedIqama: iqamaCandidate,
-            reason: `No employee registered with Iqama or Badge ID "${iqamaCandidate}"`
+        // Direct candidate match if single upload passes explicit requestId
+        if (req.body.requestId && files.length === 1) {
+          request = await prisma.medicalRequest.findUnique({
+            where: { id: String(req.body.requestId) },
+            include: { employee: true, test: true }
           });
-          continue;
+          if (request) {
+            employee = request.employee;
+            if (!iqamaCandidate) iqamaCandidate = employee.iqamaId || employee.employeeNo;
+          }
         }
 
-        // Find or create a MedicalRequest for this employee
-        let request = await prisma.medicalRequest.findFirst({
-          where: {
-            employeeId: employee.id,
-            status: { in: [RequestStatus.WAITING, RequestStatus.SUBMITTED, RequestStatus.SCHEDULED] }
-          },
-          orderBy: { createdAt: 'desc' }
-        });
+        // Otherwise extract candidate Iqama number from filename or explicit employee identifier
+        if (!employee) {
+          const ext = path.extname(file.originalname);
+          const baseName = path.basename(file.originalname, ext);
+          const tenDigitMatch = baseName.match(/\b\d{10}\b/);
+          if (!iqamaCandidate) {
+            iqamaCandidate = tenDigitMatch ? tenDigitMatch[0] : baseName.trim();
+          }
 
-        if (!request) {
-          const reqCount = await prisma.medicalRequest.count();
-          request = await prisma.medicalRequest.create({
-            data: {
-              id: `MR-2026-${String(reqCount + 100).padStart(4, '0')}`,
-              employeeId: employee.id,
-              testId: targetTestId,
-              vendorId: clinicVendorId,
-              status: RequestStatus.COMPLETED
+          // Search for matching employee by iqamaId or employeeNo
+          employee = await prisma.employee.findFirst({
+            where: {
+              OR: [
+                { iqamaId: iqamaCandidate },
+                { employeeNo: iqamaCandidate },
+                { id: iqamaCandidate }
+              ]
             }
           });
+
+          if (!employee) {
+            unmatched.push({
+              fileName: file.originalname,
+              extractedIqama: iqamaCandidate,
+              reason: `No employee registered with Iqama or Badge ID "${iqamaCandidate}"`
+            });
+            continue;
+          }
+        }
+
+        // Find or create a MedicalRequest for this employee if not already identified
+        if (!request) {
+          request = await prisma.medicalRequest.findFirst({
+            where: {
+              employeeId: employee.id,
+              status: { in: [RequestStatus.WAITING, RequestStatus.SUBMITTED, RequestStatus.SCHEDULED] }
+            },
+            orderBy: { createdAt: 'desc' }
+          });
+
+          if (!request) {
+            // Fallback: check if there is an existing request for this employee
+            request = await prisma.medicalRequest.findFirst({
+              where: { employeeId: employee.id },
+              orderBy: { createdAt: 'desc' }
+            });
+          }
+
+          if (!request) {
+            const reqCount = await prisma.medicalRequest.count();
+            request = await prisma.medicalRequest.create({
+              data: {
+                id: `MR-2026-${String(reqCount + 100).padStart(4, '0')}`,
+                employeeId: employee.id,
+                testId: targetTestId,
+                vendorId: clinicVendorId,
+                status: RequestStatus.COMPLETED
+              }
+            });
+          }
         }
 
         const repCount = await prisma.medicalReport.count();
@@ -366,6 +407,357 @@ export class ReportsController {
     } catch (e: any) {
       console.error('Bulk upload error:', e);
       return res.status(500).json({ error: e.message || 'Failed to process bulk PDF upload' });
+    }
+  }
+
+  static async getWorkforceClearance(req: Request, res: Response) {
+    try {
+      const search = (req.query.search as string || '').toLowerCase().trim();
+      const department = req.query.department as string;
+      const statusFilter = req.query.status as string;
+      const batchFilter = req.query.batchId as string;
+
+      const employees = await prisma.employee.findMany({
+        where: {
+          OR: [
+            { employeeNo: { startsWith: 'E102' } },
+            { employeeNo: { startsWith: 'E103' } }
+          ]
+        },
+        include: {
+          reports: {
+            include: {
+              test: true,
+              vendor: true
+            },
+            orderBy: { testDate: 'desc' }
+          },
+          requests: {
+            include: {
+              test: true,
+              vendor: true,
+              report: true
+            },
+            orderBy: { createdAt: 'desc' }
+          }
+        },
+        orderBy: { employeeNo: 'asc' }
+      });
+
+      const now = new Date('2026-11-06T00:00:00.000Z');
+
+      const shortNameMap: Record<string, string> = {
+        '5004956': 'Iqama',
+        '5004970': 'Pre-employment,',
+        '5004985': 'Pre-employment,',
+        '5004959': 'SABIC',
+        '5004972': 'Yanpet',
+        '5004958': "Ma'aden",
+        '5004966': 'Driving',
+        '5004979': 'Hadeed',
+        '5004963': 'Saipem',
+        '5004973': 'Yansab',
+        '5004978': 'Amiral',
+        '5004974': 'Bahrain',
+        '5004975': 'CPP',
+        '5004977': 'SAFCO',
+        '5004981': 'SATORP',
+        '5004984': 'Food',
+        '5004955': 'Sadara',
+        '5004961': 'Aramco',
+        '5004964': 'PetroKemya',
+        '5004976': 'Sharq'
+      };
+
+      const formatDisplayDate = (d?: Date | null) => {
+        if (!d) return '—';
+        const dateObj = new Date(d);
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        const month = months[dateObj.getMonth()];
+        const year = dateObj.getFullYear();
+        return `${day} ${month} ${year}`;
+      };
+
+      // Map each employee with their cards, batch metadata, and compliance status
+      const allRows = employees.map(emp => {
+        // Resolve batch metadata from employee's requests
+        let employeeBatchId = 'BATCH-CORE';
+        let employeeBatchName = 'Enterprise Workforce Roster';
+        let employeePlant = emp.division || emp.department || 'Main Complex';
+        let employeeAssignedClinic: string | null = null;
+        let employeeProtocol = 'Periodic Clearance';
+        let employeeRequestedDate = '02 Nov 2026';
+        let employeeRequestStatus = 'COMPLETED';
+
+        for (const req of emp.requests) {
+          let meta: any = {};
+          if (req.note) {
+            try {
+              meta = typeof req.note === 'string' ? JSON.parse(req.note) : req.note;
+            } catch (_) {}
+          }
+          let b = meta.batchId;
+          if (!b) {
+            if (req.id.startsWith('REQ-2026-0104')) b = 'REQ-2026-0104';
+            else if (req.id.startsWith('REQ-2026-0101')) b = 'REQ-2026-0101';
+            else if (req.id.startsWith('REQ-2026-0102')) b = 'REQ-2026-0102';
+            else if (req.id.startsWith('REQ-2026-0103')) b = 'REQ-2026-0103';
+            else if (req.id.startsWith('BULK-')) b = req.id.split('-').slice(0, 3).join('-');
+          }
+          if (b && b !== 'BATCH-2026-CLEARANCE-ROSTER') {
+            employeeBatchId = b;
+            employeeBatchName = meta.batchName || (
+              b === 'REQ-2026-0104' ? 'Yanpet medical test' :
+              b === 'REQ-2026-0101' ? 'Sadara medical test' :
+              b === 'REQ-2026-0102' ? 'SABIC medical screening with TSH' :
+              b === 'REQ-2026-0103' ? 'General medical fitness' :
+              (meta.fileName ? `Bulk Upload: ${meta.fileName}` : `Batch ${b}`)
+            );
+            employeePlant = meta.plant || (
+              b === 'REQ-2026-0104' ? 'Yanpet Plant' :
+              b === 'REQ-2026-0101' ? 'Complex South' :
+              b === 'REQ-2026-0102' ? 'Jubail Site' :
+              b === 'REQ-2026-0103' ? 'Logistics Wing' : 'Main Industrial Complex'
+            );
+            employeeProtocol = meta.protocolType || (
+              b === 'REQ-2026-0104' ? 'Periodic Clearance' :
+              b === 'REQ-2026-0101' ? 'Annual Comprehensive' :
+              b === 'REQ-2026-0102' ? 'Endocrine & Fitness Panel' :
+              b === 'REQ-2026-0103' ? 'Contractor Onboarding' : 'Roster Clearance'
+            );
+            if (req.vendor?.name) {
+              employeeAssignedClinic = req.vendor.name;
+            } else if (b === 'REQ-2026-0104') {
+              employeeAssignedClinic = 'Badr Al Khaleej Polyclinic Co.';
+            } else if (b === 'REQ-2026-0101') {
+              employeeAssignedClinic = 'Badr Al Khaleej Polyclinic Co.';
+            } else if (b === 'REQ-2026-0102') {
+              employeeAssignedClinic = 'Gulf Asian Medical Centre';
+            } else if (b === 'REQ-2026-0103') {
+              employeeAssignedClinic = 'Dina Medical Center';
+            }
+            if (req.createdAt) {
+              employeeRequestedDate = formatDisplayDate(req.createdAt);
+            }
+            employeeRequestStatus = req.status;
+            break;
+          }
+        }
+
+        let cards = emp.reports.map(rep => {
+          const validUntil = rep.validUntil ? new Date(rep.validUntil) : null;
+          let daysLeft = 0;
+          let cardStatus: 'VALID' | 'EXPIRING_SOON' | 'EXPIRED' = 'VALID';
+
+          if (validUntil) {
+            const diffMs = validUntil.getTime() - now.getTime();
+            daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+            if (daysLeft < 0) {
+              cardStatus = 'EXPIRED';
+            } else if (daysLeft <= 60) {
+              cardStatus = 'EXPIRING_SOON';
+            } else {
+              cardStatus = 'VALID';
+            }
+          }
+
+          const shortName = shortNameMap[rep.testId] || rep.test.name.split(' ')[0];
+
+          return {
+            id: rep.id,
+            testId: rep.testId,
+            name: rep.test.name,
+            shortName,
+            validity: `${rep.test.validityMonths || 12} months`,
+            issued: formatDisplayDate(rep.testDate),
+            validUntil: formatDisplayDate(rep.validUntil),
+            daysLeft,
+            status: cardStatus,
+            clinicName: rep.vendor?.name || employeeAssignedClinic || 'Accredited Medical Center',
+            fileUrl: rep.fileUrl,
+            result: rep.result
+          };
+        });
+
+        // Fallback: If no reports yet, synthesize card from employee's primary request
+        if (cards.length === 0 && emp.requests.length > 0) {
+          const primaryReq = emp.requests[0];
+          const shortName = shortNameMap[primaryReq.testId] || (primaryReq.test?.name ? primaryReq.test.name.split(' ')[0] : 'Fitness');
+          cards.push({
+            id: primaryReq.id,
+            testId: primaryReq.testId,
+            name: primaryReq.test?.name || 'Occupational Medical Examination',
+            shortName,
+            validity: `${primaryReq.test?.validityMonths || 12} months`,
+            issued: primaryReq.apptDate ? formatDisplayDate(primaryReq.apptDate) : 'Dispatched',
+            validUntil: 'Pending Clinic Submission',
+            daysLeft: 30,
+            status: 'EXPIRING_SOON',
+            clinicName: primaryReq.vendor?.name || employeeAssignedClinic || 'Accredited Medical Center',
+            fileUrl: primaryReq.report?.fileUrl || '',
+            result: primaryReq.report?.result || 'PENDING'
+          });
+        }
+
+        let overall: 'VALID' | 'EXPIRING_SOON' | 'EXPIRED' = 'VALID';
+        if (cards.some(c => c.status === 'EXPIRED')) {
+          overall = 'EXPIRED';
+        } else if (cards.some(c => c.status === 'EXPIRING_SOON')) {
+          overall = 'EXPIRING_SOON';
+        }
+
+        return {
+          id: emp.employeeNo,
+          employeeId: emp.id,
+          name: emp.name,
+          dept: emp.department || 'LOGISTIC',
+          iqamaId: emp.iqamaId,
+          batchId: employeeBatchId,
+          batchName: employeeBatchName,
+          plant: employeePlant,
+          protocolType: employeeProtocol,
+          requestedDate: employeeRequestedDate,
+          assignedClinic: employeeAssignedClinic || 'Accredited Medical Center',
+          requestStatus: employeeRequestStatus,
+          medicalCards: cards,
+          overall
+        };
+      });
+
+      // Filter to the 70 employees from E10200 to E10269 for the baseline Master Roster
+      const candidateMasterRows = allRows.filter(r => {
+        const num = parseInt(r.id.replace(/\D/g, ''), 10);
+        return num >= 10200 && num <= 10269;
+      });
+
+      // Assemble list of all Batches
+      const batchDefs = [
+        {
+          id: 'REQ-2026-0104',
+          name: 'Yanpet medical test',
+          plant: 'Yanpet Plant',
+          protocolType: 'Periodic Clearance',
+          requestedDate: '02 Nov 2026',
+          assignedClinic: 'Badr Al Khaleej Polyclinic Co.'
+        },
+        {
+          id: 'REQ-2026-0101',
+          name: 'Sadara medical test',
+          plant: 'Complex South',
+          protocolType: 'Annual Comprehensive',
+          requestedDate: '28 Oct 2026',
+          assignedClinic: 'Badr Al Khaleej Polyclinic Co.'
+        },
+        {
+          id: 'REQ-2026-0102',
+          name: 'SABIC medical screening with TSH',
+          plant: 'Jubail Site',
+          protocolType: 'Endocrine & Fitness Panel',
+          requestedDate: '30 Oct 2026',
+          assignedClinic: 'Gulf Asian Medical Centre'
+        },
+        {
+          id: 'REQ-2026-0103',
+          name: 'General medical fitness',
+          plant: 'Logistics Wing',
+          protocolType: 'Contractor Onboarding',
+          requestedDate: '01 Nov 2026',
+          assignedClinic: 'Dina Medical Center'
+        }
+      ];
+
+      // Add dynamic bulk batches
+      const seenBatchIds = new Set(batchDefs.map(b => b.id));
+      allRows.forEach(r => {
+        if (r.batchId && (r.batchId.startsWith('BULK-') || !seenBatchIds.has(r.batchId))) {
+          if (!seenBatchIds.has(r.batchId) && r.batchId !== 'BATCH-CORE') {
+            seenBatchIds.add(r.batchId);
+            batchDefs.push({
+              id: r.batchId,
+              name: r.batchName,
+              plant: r.plant,
+              protocolType: r.protocolType || 'Bulk Intake Batch',
+              requestedDate: r.requestedDate || 'Recent',
+              assignedClinic: r.assignedClinic || 'Accredited Medical Center'
+            });
+          }
+        }
+      });
+
+      // Compute statistics for each batch
+      const batches = batchDefs.map(b => {
+        const batchEmployees = allRows.filter(r => r.batchId === b.id);
+        const total = batchEmployees.length;
+        const valid = batchEmployees.filter(r => r.overall === 'VALID').length;
+        const expiringSoon = batchEmployees.filter(r => r.overall === 'EXPIRING_SOON').length;
+        const expired = batchEmployees.filter(r => r.overall === 'EXPIRED').length;
+        // Done count: employees who have completed medical cards with valid fitness
+        const done = valid;
+        const pending = total - done;
+        const completionRate = total > 0 ? Math.round((done / total) * 100) : 0;
+
+        return {
+          id: b.id,
+          name: b.name,
+          plant: b.plant,
+          protocolType: b.protocolType,
+          requestedDate: b.requestedDate,
+          assignedClinic: b.assignedClinic,
+          totalEmployees: total,
+          doneCount: done,
+          pendingCount: pending,
+          validCount: valid,
+          expiringSoonCount: expiringSoon,
+          expiredCount: expired,
+          completionRate,
+          employees: batchEmployees
+        };
+      });
+
+      // Determine effective rows based on batchId parameter
+      let effectiveRows = candidateMasterRows;
+      if (batchFilter && batchFilter !== 'ALL') {
+        const batchSpecific = allRows.filter(r => r.batchId === batchFilter);
+        effectiveRows = batchSpecific.length > 0 ? batchSpecific : candidateMasterRows;
+      }
+
+      const kpis = {
+        totalEmployees: effectiveRows.length,
+        allCardsValid: effectiveRows.filter(r => r.overall === 'VALID').length,
+        expiringWithin60: effectiveRows.filter(r => r.overall === 'EXPIRING_SOON').length,
+        hasExpiredCard: effectiveRows.filter(r => r.overall === 'EXPIRED').length
+      };
+
+      const departments = Array.from(new Set(allRows.map(r => r.dept).filter(Boolean)));
+
+      let filtered = effectiveRows;
+      if (search) {
+        filtered = filtered.filter(r =>
+          r.name.toLowerCase().includes(search) ||
+          r.id.toLowerCase().includes(search) ||
+          (r.iqamaId && r.iqamaId.includes(search)) ||
+          (r.batchName && r.batchName.toLowerCase().includes(search)) ||
+          (r.batchId && r.batchId.toLowerCase().includes(search))
+        );
+      }
+      if (department && department !== 'ALL') {
+        filtered = filtered.filter(r => r.dept === department);
+      }
+      if (statusFilter && statusFilter !== 'ALL') {
+        filtered = filtered.filter(r => r.overall === statusFilter);
+      }
+
+      return res.json({
+        kpis,
+        departments,
+        batches,
+        employees: filtered,
+        totalShown: filtered.length
+      });
+    } catch (e: any) {
+      console.error('Workforce clearance error:', e);
+      return res.status(500).json({ error: e.message });
     }
   }
 }

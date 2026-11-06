@@ -184,6 +184,7 @@ interface ParsedCandidate {
   notes: string;
   labData: LabData;
   pdfFileUrl?: string;
+  isCertified: boolean;
   rawRequest: any;
 }
 
@@ -201,6 +202,17 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
   const [loading, setLoading] = useState<boolean>(true);
   const [activeCandidateId, setActiveCandidateId] = useState<string>('');
   const [filterFitState, setFilterFitState] = useState<'ALL' | 'FIT' | 'CONDITIONAL' | 'UNFIT' | 'EXPIRING'>('ALL');
+  const [tableSection, setTableSection] = useState<'single' | 'bulk'>('single');
+  // Confirm Test & Certificate Issuance Modal State
+  const [confirmCandidate, setConfirmCandidate] = useState<ParsedCandidate | null>(null);
+  const [confirmResult, setConfirmResult] = useState<'FIT' | 'CONDITIONAL' | 'UNFIT'>('FIT');
+  const [confirmDoctor, setConfirmDoctor] = useState<string>('Dr. Farooq Al-Zahrani, MD');
+  const [confirmDate, setConfirmDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [confirmValidityTerm, setConfirmValidityTerm] = useState<string>('2 Years (Petro)');
+  const [confirmRemarks, setConfirmRemarks] = useState<string>('All occupational diagnostics verified normal. Clinically cleared for unrestricted duty.');
+  const [shouldGenerateCertificate, setShouldGenerateCertificate] = useState<boolean>(true);
+  const [confirmingLoading, setConfirmingLoading] = useState<boolean>(false);
+  const [expandedDateGroups, setExpandedDateGroups] = useState<Record<string, boolean>>({});
 
   // Interactive Form State for Active Candidate
   const [selectedFitStatus, setSelectedFitStatus] = useState<'FIT' | 'CONDITIONAL' | 'UNFIT'>('FIT');
@@ -509,6 +521,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
         notes: cleanNotes,
         labData,
         pdfFileUrl,
+        isCertified: Boolean(r.status === 'COMPLETED' && rep.id && rep.result),
         rawRequest: r
       };
     });
@@ -538,6 +551,96 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
     }
     return list;
   }, [filteredCandidates, tableSearch]);
+
+  // Helper to distinguish bulk roster candidates from single clearance requests
+  const isCandidateBulk = (c: ParsedCandidate) => {
+    const r = c.rawRequest;
+    if (!r) return false;
+    if (r.id?.startsWith('BULK-') || r.id?.startsWith('REQ-')) return true;
+    if (r.note && (r.note.includes('batchId') || r.note.includes('[Batch') || r.note.startsWith('{'))) return true;
+    return false;
+  };
+
+  // Segregate single candidates vs bulk candidates
+  const singleCandidates = useMemo(() => {
+    return filteredTableCandidates.filter(c => !isCandidateBulk(c));
+  }, [filteredTableCandidates]);
+
+  const bulkCandidates = useMemo(() => {
+    return filteredTableCandidates.filter(c => isCandidateBulk(c));
+  }, [filteredTableCandidates]);
+
+  // Bulk candidates segregated together based on the date they were requested
+  interface BulkDateGroup {
+    dateKey: string;
+    displayDate: string;
+    batchTitle: string;
+    candidates: ParsedCandidate[];
+    totalCount: number;
+    doneCount: number;
+    pendingCount: number;
+  }
+
+  const bulkDateGroups = useMemo(() => {
+    const groups: Record<string, BulkDateGroup> = {};
+
+    bulkCandidates.forEach((c) => {
+      const rawDate = c.rawRequest?.createdAt;
+      const dateKey = rawDate ? new Date(rawDate).toISOString().slice(0, 10) : '2026-11-06';
+      const displayDate = rawDate
+        ? new Date(rawDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+        : 'Recent Intake';
+
+      let batchTitle = 'Bulk Clearance Batch';
+      if (c.rawRequest?.note) {
+        try {
+          const parsed = typeof c.rawRequest.note === 'string' ? JSON.parse(c.rawRequest.note) : c.rawRequest.note;
+          if (parsed?.batchName) batchTitle = parsed.batchName;
+        } catch (_) {
+          if (c.rawRequest.note.includes('[Batch')) {
+            const match = c.rawRequest.note.match(/\[Batch\s+([^\]]+)\]/);
+            if (match) batchTitle = match[1];
+          }
+        }
+      }
+      if (batchTitle === 'Bulk Clearance Batch' && c.rawRequest?.id) {
+        if (c.rawRequest.id.startsWith('REQ-') || c.rawRequest.id.startsWith('BULK-')) {
+          const parts = c.rawRequest.id.split('-');
+          batchTitle = parts.slice(0, 3).join('-');
+        }
+      }
+
+      const groupKey = `${dateKey}_${batchTitle}`;
+      if (!groups[groupKey]) {
+        groups[groupKey] = {
+          dateKey,
+          displayDate,
+          batchTitle,
+          candidates: [],
+          totalCount: 0,
+          doneCount: 0,
+          pendingCount: 0
+        };
+      }
+
+      groups[groupKey].candidates.push(c);
+      groups[groupKey].totalCount++;
+      if (c.isCertified) {
+        groups[groupKey].doneCount++;
+      } else {
+        groups[groupKey].pendingCount++;
+      }
+    });
+
+    return Object.values(groups).sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+  }, [bulkCandidates]);
+
+  const toggleDateGroup = (groupKey: string) => {
+    setExpandedDateGroups((prev) => ({
+      ...prev,
+      [groupKey]: prev[groupKey] === undefined ? false : !prev[groupKey]
+    }));
+  };
 
   // Active Selected Candidate
   const activeCandidate = useMemo(() => {
@@ -675,6 +778,9 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
       const formData = new FormData();
       formData.append('files', file);
       formData.append('vendorId', selectedVendorId);
+      formData.append('requestId', candidate.id);
+      formData.append('employeeId', candidate.employeeId);
+      formData.append('iqamaId', candidate.iqamaId);
       formData.append('testId', candidate.rawRequest?.testId || bulkTestId);
       formData.append('testDate', new Date().toISOString().slice(0, 10));
       formData.append('validityMonths', '24');
@@ -722,34 +828,71 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
   };
 
   // Open Real Certificate Modal
-  const handleOpenCertificate = async () => {
-    if (!activeCandidate) return;
+  // Open Real Certificate Modal
+  const handleOpenCertificate = async (candidate?: any) => {
+    const target = candidate || activeCandidate;
+    if (!target) return;
+    const reportId = target.rawRequest?.report?.id || (target.rawRequest?.status === 'COMPLETED' ? target.id : null);
+    if (!reportId || !target.isCertified) {
+      alert('No official medical certificate has been generated yet for this candidate. Please confirm the test results first.');
+      return;
+    }
     try {
-      const res = await api.getCertificate(activeCandidate.id);
+      const res = await api.getCertificate(reportId);
       setSelectedCertificate(res.data.certificate);
-    } catch (_) {
-      // Fallback constructed certificate if report was just minted
-      setSelectedCertificate({
-        certificateNo: `CERT-${activeCandidate.id.replace('MR-', '')}`,
-        requestId: activeCandidate.id,
-        employeeName: activeCandidate.name,
-        employeeNo: activeCandidate.employeeNo,
-        iqamaId: activeCandidate.iqamaId,
-        nationality: 'Saudi Arabian / Expat',
-        division: activeCandidate.deptFull.split('•')[0]?.trim() || 'Logistics',
-        department: activeCandidate.deptFull,
-        position: 'Industrial Specialist',
-        clinicName: currentClinic.name,
-        clinicCode: currentClinic.code,
-        sapVendorNo: currentClinic.sapVendorNo,
-        testName: activeCandidate.protocol,
-        sapMaterialCode: '5004959',
-        result: selectedFitStatus,
-        testDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-        validUntil: customExpiryDate,
-        remarks: physicianRemarks,
-        examiningPhysician: examiningDoctor
+    } catch (e: any) {
+      alert(`Could not fetch certificate: ${e?.response?.data?.error || e.message}`);
+    }
+  };
+
+  // Confirm Test Completion & Certificate Issuance Handlers
+  const handleOpenConfirmModal = (c: ParsedCandidate) => {
+    setConfirmCandidate(c);
+    setConfirmResult(c.fitStatus || 'FIT');
+    setConfirmDoctor(examiningDoctor || 'Dr. Farooq Al-Zahrani, MD');
+    setConfirmDate(new Date().toISOString().slice(0, 10));
+    setConfirmValidityTerm(c.validityTerm || '2 Years (Petro)');
+    setConfirmRemarks(c.notes || 'All occupational diagnostics verified normal. Clinically cleared for unrestricted duty.');
+    setShouldGenerateCertificate(true);
+  };
+
+  const handleConfirmTestCompleted = async () => {
+    if (!confirmCandidate) return;
+
+    if (!shouldGenerateCertificate) {
+      alert(`Test results recorded as pending for ${confirmCandidate.name}. No certificate was generated.`);
+      setConfirmCandidate(null);
+      return;
+    }
+
+    setConfirmingLoading(true);
+    try {
+      const res = await api.submitReportResult({
+        requestId: confirmCandidate.id,
+        result: confirmResult,
+        testDate: confirmDate,
+        doctorName: confirmDoctor,
+        remarks: JSON.stringify({
+          notes: confirmRemarks,
+          validityTerm: confirmValidityTerm,
+          doctorName: confirmDoctor
+        })
       });
+
+      setConfirmCandidate(null);
+      await loadClinicData(selectedVendorId);
+
+      // Open newly minted certificate
+      if (res.data?.report?.id) {
+        try {
+          const certRes = await api.getCertificate(res.data.report.id);
+          setSelectedCertificate(certRes.data.certificate);
+        } catch (_) {}
+      }
+    } catch (e: any) {
+      alert(`Failed to confirm test and generate certificate: ${e?.response?.data?.error || e.message}`);
+    } finally {
+      setConfirmingLoading(false);
     }
   };
 
@@ -810,16 +953,22 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 <h1 className="font-display font-extrabold text-xl text-slate-900 leading-tight">
                   {currentClinic.name}
                 </h1>
-                {/* DYNAMIC CLINIC DROPDOWN FETCHED DIRECTLY FROM DATABASE */}
-                <select
-                  value={selectedVendorId}
-                  onChange={(e) => setSelectedVendorId(e.target.value)}
-                  className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold px-2 py-1 rounded-lg border border-slate-300 focus:outline-none cursor-pointer"
-                >
-                  {clinics.map(c => (
-                    <option key={c.id} value={c.id}>{c.code} - {c.name}</option>
-                  ))}
-                </select>
+                {/* CLINIC SWITCHER: ADMIN ONLY; LOCKED FOR CLINIC DESK USERS */}
+                {userRole === 'ADMIN' ? (
+                  <select
+                    value={selectedVendorId}
+                    onChange={(e) => setSelectedVendorId(e.target.value)}
+                    className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold px-2 py-1 rounded-lg border border-slate-300 focus:outline-none cursor-pointer"
+                  >
+                    {clinics.map(c => (
+                      <option key={c.id} value={c.id}>{c.code} - {c.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-xs bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded-lg border border-slate-200">
+                    {currentClinic.code}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
                 Location: {currentClinic.location} &bull; SAP Vendor ID: {currentClinic.sapVendorNo} &bull; Contract: {currentClinic.contractNo}
@@ -1053,29 +1202,6 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                   <span>Upload Folder of Reports (by Iqama #)</span>
                 </button>
 
-                {/* View Mode Toggle: Simplified 6-Field Table vs Clearance Workspace */}
-                <div className="flex items-center p-0.5 rounded-xl bg-slate-100 border border-slate-200 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('table')}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                      viewMode === 'table' ? 'bg-white text-primary shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <span className="material-symbols-outlined text-[15px]">table_rows</span>
-                    <span>Reports Table (6 Fields)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('workspace')}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                      viewMode === 'workspace' ? 'bg-white text-primary shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <span className="material-symbols-outlined text-[15px]">view_agenda</span>
-                    <span>Clearance Workspace</span>
-                  </button>
-                </div>
 
                 {/* Fit State Filter */}
                 <select
@@ -1100,24 +1226,58 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
               </div>
             </div>
 
-            {/* SIMPLIFIED 6-FIELD REPORTS TABLE (NAME, REPORT NAME, IQAMA #, ISSUE DATE, EXPIRY DATE, MEDICAL CENTER + VIEW PDF) */}
-            {viewMode === 'table' && (
-              <div className="space-y-3 pt-2">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
-                  <div className="relative flex-1 max-w-sm">
+            {/* 2-SECTION REPORTS TABLE: SINGLE EMPLOYEE VIEW & BULK VIEW (SEGREGATED BY REQUEST DATE) */}
+              <div className="space-y-4 pt-2">
+                {/* 1. TWO-SECTION VIEW SELECTOR HEADER */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200/90">
+                  <div className="flex items-center gap-1.5 bg-slate-200/80 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setTableSection('single')}
+                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        tableSection === 'single'
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[16px]">person</span>
+                      <span>Single Employee View</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200 text-slate-700 font-mono">
+                        {singleCandidates.length}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTableSection('bulk')}
+                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        tableSection === 'bulk'
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[16px]">group</span>
+                      <span>Bulk View (By Request Date)</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-secondary text-white font-mono">
+                        {bulkCandidates.length}
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="relative flex-1 max-w-xs">
                     <span className="material-symbols-outlined absolute left-3 top-2 text-slate-400 text-[17px]">
                       search
                     </span>
                     <input
                       type="text"
-                      placeholder="Search candidate name, Iqama #, or report name..."
+                      placeholder="Search candidate name, Iqama #..."
                       value={tableSearch}
                       onChange={(e) => setTableSearch(e.target.value)}
                       className="w-full pl-9 pr-3 py-1 rounded-lg border border-slate-200 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-primary bg-white shadow-2xs"
                     />
                   </div>
+
                   <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
-                    <span>Showing <strong className="text-slate-800">{filteredTableCandidates.length}</strong> reports</span>
+                    <span>Showing <strong className="text-slate-800">{tableSection === 'single' ? singleCandidates.length : bulkCandidates.length}</strong> reports</span>
                     <span className="text-slate-300">&bull;</span>
                     <span className="text-emerald-700 font-bold">
                       {filteredTableCandidates.filter(c => c.pdfFileUrl).length} PDFs attached
@@ -1125,873 +1285,319 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                   </div>
                 </div>
 
-                {filteredTableCandidates.length === 0 ? (
-                  <div className="py-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                    <p className="text-sm font-semibold">No medical reports match the search criteria.</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto rounded-xl border border-slate-200">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50/90 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold tracking-wider">
-                        <tr>
-                          <th className="py-3 px-3.5">1. Employee Name</th>
-                          <th className="py-3 px-3.5">2. Name of Report</th>
-                          <th className="py-3 px-3.5">3. Iqama Number</th>
-                          <th className="py-3 px-3.5">4. Issue Date</th>
-                          <th className="py-3 px-3.5">5. Expiry Date</th>
-                          <th className="py-3 px-3.5">6. Medical Center Name</th>
-                          <th className="py-3 px-3.5 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-medium">
-                        {filteredTableCandidates.map((c) => (
-                          <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
-                            {/* 1. Name */}
-                            <td className="py-3 px-3.5">
-                              <div className="flex items-center gap-2.5">
-                                <span className="h-7 w-7 rounded-full bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0">
-                                  {c.initials}
-                                </span>
-                                <div>
-                                  <div className="font-bold text-slate-900">{c.name}</div>
-                                  <div className="text-[11px] text-slate-400 font-mono">SAP: {c.employeeNo}</div>
-                                </div>
-                              </div>
-                            </td>
-
-                            {/* 2. Name of Report */}
-                            <td className="py-3 px-3.5">
-                              <div className="font-semibold text-slate-800">{c.protocol}</div>
-                              <div className="text-[10px] text-slate-400">Occupational Fitness Protocol</div>
-                            </td>
-
-                            {/* 3. Iqama Number */}
-                            <td className="py-3 px-3.5">
-                              <span className="font-mono font-bold text-primary bg-primary/5 px-2 py-0.5 rounded border border-primary/20">
-                                {c.iqamaId}
-                              </span>
-                            </td>
-
-                            {/* 4. Issue Date */}
-                            <td className="py-3 px-3.5 font-mono text-slate-700">
-                              {c.issueDate}
-                            </td>
-
-                            {/* 5. Expiry Date */}
-                            <td className="py-3 px-3.5 font-mono">
-                              <span className="font-bold text-emerald-700">
-                                {c.expiryDate}
-                              </span>
-                            </td>
-
-                            {/* 6. Medical Center Name */}
-                            <td className="py-3 px-3.5">
-                              <div className="font-bold text-slate-800">{c.rawRequest?.vendor?.name || currentClinic.name}</div>
-                              <div className="text-[10px] text-slate-400">CR: {currentClinic.crNumber}</div>
-                            </td>
-
-                            {/* Actions: View PDF / Single Upload */}
-                            <td className="py-3 px-3.5 text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                {c.pdfFileUrl ? (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedPdfReport({
-                                          employeeName: c.name,
-                                          reportName: c.protocol,
-                                          iqamaNumber: c.iqamaId,
-                                          issueDate: c.issueDate,
-                                          expiryDate: c.expiryDate,
-                                          clinicName: currentClinic.name,
-                                          pdfUrl: c.pdfFileUrl
-                                        });
-                                      }}
-                                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary hover:bg-slate-900 text-white font-bold text-xs transition-all shadow-xs cursor-pointer"
-                                    >
-                                      <span className="material-symbols-outlined text-[15px] text-red-300">picture_as_pdf</span>
-                                      <span>View PDF</span>
-                                    </button>
-                                    <a
-                                      href={c.pdfFileUrl}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      title="Open in new window"
-                                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
-                                    >
-                                      <span className="material-symbols-outlined text-[16px]">open_in_new</span>
-                                    </a>
-                                  </>
-                                ) : (
-                                  <label className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors cursor-pointer border border-slate-200">
-                                    <span className="material-symbols-outlined text-[15px] text-primary">upload_file</span>
-                                    <span>Upload PDF</span>
-                                    <input
-                                      type="file"
-                                      accept=".pdf"
-                                      className="hidden"
-                                      onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) handleSinglePdfUpload(c, file);
-                                      }}
-                                    />
-                                  </label>
-                                )}
-                              </div>
-                            </td>
+                {/* HELPER ROW RENDERER FUNCTION */}
+                {(() => {
+                  const renderCandidateTable = (candidateList: ParsedCandidate[], showDateCol: boolean = false) => (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50/90 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold tracking-wider">
+                          <tr>
+                            <th className="py-3 px-3.5">1. Employee Name</th>
+                            <th className="py-3 px-3.5">2. Name of Report</th>
+                            <th className="py-3 px-3.5">3. Iqama Number</th>
+                            <th className="py-3 px-3.5">{showDateCol ? '4. Requested Date' : '4. Issue Date'}</th>
+                            <th className="py-3 px-3.5">5. Expiry Date</th>
+                            <th className="py-3 px-3.5">6. Medical Center Name</th>
+                            <th className="py-3 px-3.5">Test & Certificate Status</th>
+                            <th className="py-3 px-3.5 text-right">Actions</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium">
+                          {candidateList.map((c) => {
+                            const reqDate = c.rawRequest?.createdAt
+                              ? new Date(c.rawRequest.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                              : c.issueDate;
+                            return (
+                              <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
+                                {/* 1. Name */}
+                                <td className="py-3 px-3.5">
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="h-7 w-7 rounded-full bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0">
+                                      {c.initials}
+                                    </span>
+                                    <div>
+                                      <div className="font-bold text-slate-900">{c.name}</div>
+                                      <div className="text-[11px] text-slate-400 font-mono">SAP: {c.employeeNo}</div>
+                                    </div>
+                                  </div>
+                                </td>
 
-            {/* Candidate Cards Grid (Shown in Clearance Workspace view) */}
-            {viewMode === 'workspace' && (
-              filteredCandidates.length === 0 ? (
-                <div className="py-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                  <p className="text-sm font-semibold">No candidates found in this queue.</p>
-                  <p className="text-xs text-slate-400 mt-1">Switch clinic facility above or submit new clearance requests.</p>
-                </div>
-              ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {filteredCandidates.map((c) => {
-                  const isSelected = c.id === activeCandidate?.id;
-                  return (
-                    <div
-                      key={c.id}
-                      onClick={() => setActiveCandidateId(c.id)}
-                      className={`p-3 rounded-xl border transition-all cursor-pointer relative ${
-                        isSelected
-                          ? 'bg-slate-50 border-primary ring-2 ring-primary/20 border-l-4 border-l-primary shadow-sm'
-                          : 'bg-white border-slate-200 hover:bg-slate-50/70 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          {c.avatarUrl ? (
-                            <img
-                              src={c.avatarUrl}
-                              alt={c.name}
-                              className="h-8 w-8 rounded-full object-cover shrink-0 ring-1 ring-slate-200"
-                            />
-                          ) : (
-                            <span className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                              isSelected ? 'bg-primary text-white' : 'bg-slate-200 text-slate-700'
-                            }`}>
-                              {c.initials}
-                            </span>
-                          )}
-                          <div className="min-w-0">
-                            <p className="font-bold text-slate-900 text-xs leading-tight truncate">{c.name}</p>
-                            <p className="font-mono text-[11px] text-slate-500 truncate">{c.roleDept}</p>
-                          </div>
-                        </div>
+                                {/* 2. Name of Report */}
+                                <td className="py-3 px-3.5">
+                                  <div className="font-semibold text-slate-800">{c.protocol}</div>
+                                  <div className="text-[10px] text-slate-400">Occupational Fitness Protocol</div>
+                                </td>
 
-                        <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded ${
-                          c.statusBadge === 'ACTIVE'
-                            ? 'bg-primary text-white'
-                            : c.statusBadge === 'COMPLETED'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : c.statusBadge === 'EXP <= 42d'
-                            ? 'bg-red-100 text-red-700'
-                            : 'bg-slate-100 text-slate-700'
-                        }`}>
-                          {c.statusBadge}
-                        </span>
-                      </div>
+                                {/* 3. Iqama Number */}
+                                <td className="py-3 px-3.5">
+                                  <span className="font-mono font-bold text-primary bg-primary/5 px-2 py-0.5 rounded border border-primary/20">
+                                    {c.iqamaId}
+                                  </span>
+                                </td>
 
-                      <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-medium">
-                        <span className="truncate">{c.stageText}</span>
-                        <span className={`font-bold shrink-0 ${
-                          c.statusBadge === 'COMPLETED' || c.stageProgress.includes('5/5')
-                            ? 'text-emerald-600'
-                            : c.statusBadge === 'EXP <= 42d'
-                            ? 'text-red-600'
-                            : 'text-slate-600'
-                        }`}>
-                          {c.stageProgress}
-                        </span>
-                      </div>
+                                {/* 4. Issue Date or Request Date */}
+                                <td className="py-3 px-3.5 font-mono text-slate-700">
+                                  {showDateCol ? reqDate : c.issueDate}
+                                </td>
+
+                                {/* 5. Expiry Date */}
+                                <td className="py-3 px-3.5 font-mono">
+                                  <span className="font-bold text-emerald-700">
+                                    {c.expiryDate}
+                                  </span>
+                                </td>
+
+                                {/* 6. Medical Center Name */}
+                                <td className="py-3 px-3.5">
+                                  <div className="font-bold text-slate-800">{c.rawRequest?.vendor?.name || currentClinic.name}</div>
+                                  <div className="text-[10px] text-slate-400">CR: {currentClinic.crNumber}</div>
+                                </td>
+
+                                {/* Test & Certificate Status */}
+                                <td className="py-3 px-3.5">
+                                  {c.isCertified ? (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                      <span className="material-symbols-outlined text-[15px] text-emerald-600">verified</span>
+                                      <span>Certified & Completed</span>
+                                    </span>
+                                  ) : c.pdfFileUrl ? (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-sky-50 text-sky-800 border border-sky-200">
+                                      <span className="material-symbols-outlined text-[15px] text-sky-600">pending_actions</span>
+                                      <span>PDF Ready (Pending Sign-Off)</span>
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                      <span className="material-symbols-outlined text-[15px] text-amber-600">hourglass_top</span>
+                                      <span>Pending Test Results</span>
+                                    </span>
+                                  )}
+                                </td>
+
+                                {/* Actions: Prominent Upload PDF in front, View PDF, and Confirm Test / Certificate */}
+                                <td className="py-3 px-3.5 text-right">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    {/* Upload PDF Action Button */}
+                                    <label
+                                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                                        c.pdfFileUrl
+                                          ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                                          : 'bg-teal-800 hover:bg-teal-900 text-white'
+                                      }`}
+                                      title={c.pdfFileUrl ? 'Replace / Upload new PDF report' : 'Upload PDF medical report'}
+                                    >
+                                      <span className="material-symbols-outlined text-[15px]">
+                                        {c.pdfFileUrl ? 'file_upload' : 'upload_file'}
+                                      </span>
+                                      <span>{c.pdfFileUrl ? 'Replace' : 'Upload PDF'}</span>
+                                      <input
+                                        type="file"
+                                        accept=".pdf"
+                                        className="hidden"
+                                        onChange={(e) => {
+                                          const file = e.target.files?.[0];
+                                          if (file) handleSinglePdfUpload(c, file);
+                                        }}
+                                      />
+                                    </label>
+
+                                    {/* View PDF Button (when attached) */}
+                                    {c.pdfFileUrl && (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setSelectedPdfReport({
+                                              employeeName: c.name,
+                                              reportName: c.protocol,
+                                              iqamaNumber: c.iqamaId,
+                                              issueDate: c.issueDate,
+                                              expiryDate: c.expiryDate,
+                                              clinicName: currentClinic.name,
+                                              pdfUrl: c.pdfFileUrl
+                                            });
+                                          }}
+                                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary hover:bg-slate-900 text-white font-bold text-xs transition-all shadow-xs cursor-pointer"
+                                          title="View PDF Report"
+                                        >
+                                          <span className="material-symbols-outlined text-[15px] text-red-300">picture_as_pdf</span>
+                                          <span>View</span>
+                                        </button>
+                                        <a
+                                          href={c.pdfFileUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          title="Open in new window"
+                                          className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
+                                        >
+                                          <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                                        </a>
+                                      </>
+                                    )}
+
+                                    {/* ACTION BUTTON: If NOT certified yet, show Action Button to confirm test and decide if to generate certificate */}
+                                    {!c.isCertified ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenConfirmModal(c)}
+                                        title="Confirm test completed and choose whether to generate certificate"
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-800 hover:bg-teal-900 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+                                      >
+                                        <span className="material-symbols-outlined text-[15px]">verified_user</span>
+                                        <span>Confirm Test</span>
+                                      </button>
+                                    ) : (
+                                      /* ONLY when certified & completed: Show official certificate button */
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenCertificate(c)}
+                                        title="View Official Medical Certificate"
+                                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold transition-colors cursor-pointer border border-emerald-200"
+                                      >
+                                        <span className="material-symbols-outlined text-[16px] text-emerald-600">verified</span>
+                                        <span>Certificate</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   );
-                })}
-              </div>
-            ))}
-          </div>
 
-          {/* ACTIVE CANDIDATE WORKSPACE: 7 COLS (RESULTS) + 5 COLS (ISSUANCE) */}
-          {viewMode === 'workspace' && activeCandidate && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-              {/* LEFT 7 COLS: PATIENT PROFILE + TEST MATRIX */}
-              <div className="lg:col-span-7 space-y-5">
-                {/* Patient Identity Hero */}
-                <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                    <div className="flex items-center gap-4">
-                      <div className="relative shrink-0">
-                        {activeCandidate.avatarUrl ? (
-                          <img
-                            src={activeCandidate.avatarUrl}
-                            alt={activeCandidate.name}
-                            className="h-16 w-16 rounded-2xl object-cover ring-2 ring-slate-100 shadow-sm"
-                          />
-                        ) : (
-                          <div className="h-16 w-16 rounded-2xl bg-primary text-white font-extrabold text-xl flex items-center justify-center shadow-sm">
-                            {activeCandidate.initials}
+                  {/* SECTION 1: SINGLE EMPLOYEE VIEW */}
+                  if (tableSection === 'single') {
+                    if (singleCandidates.length === 0) {
+                      return (
+                        <div className="py-10 px-4 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-300 space-y-3">
+                          <div className="h-11 w-11 rounded-xl bg-slate-200 text-slate-500 flex items-center justify-center mx-auto">
+                            <span className="material-symbols-outlined text-[24px]">person_off</span>
                           </div>
-                        )}
-                        <span
-                          className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-emerald-600 text-white flex items-center justify-center ring-2 ring-white shadow-xs"
-                          title="Biometrics Verified"
-                        >
-                          <span className="material-symbols-outlined text-[13px]">fingerprint</span>
-                        </span>
-                      </div>
-
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h2 className="font-display font-extrabold text-lg text-slate-900">
-                            {activeCandidate.name}
-                          </h2>
-                          <span className="rounded-md bg-slate-100 text-slate-700 px-2 py-0.5 text-xs font-bold uppercase tracking-wider">
-                            {activeCandidate.gender} &bull; {activeCandidate.age} Yrs
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          National ID / Iqama:{' '}
-                          <span className="font-mono font-bold text-slate-800">{activeCandidate.iqamaId}</span> &bull; Blood Group:{' '}
-                          <span className="font-bold text-primary">{activeCandidate.bloodGroup}</span>
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-                          <span className="rounded bg-slate-100 text-slate-700 px-2 py-0.5 font-medium">
-                            Company: {activeCandidate.company}
-                          </span>
-                          <span className="rounded bg-slate-100 text-slate-700 px-2 py-0.5 font-medium">
-                            Dept: {activeCandidate.deptFull}
-                          </span>
-                          <span className="rounded bg-primary/10 text-primary px-2 py-0.5 font-bold">
-                            Protocol: {activeCandidate.protocol}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col sm:items-end bg-slate-50 p-3 rounded-xl border border-slate-200/70 shrink-0">
-                      <span className="text-[10.5px] uppercase tracking-wider text-slate-400 font-bold">
-                        Batch Authorization
-                      </span>
-                      <span className="font-mono text-xs font-extrabold text-primary">
-                        {activeCandidate.batchAuth}
-                      </span>
-                      <span className="text-[11px] text-slate-500 mt-0.5">
-                        Collection: Today &bull; #{activeCandidate.id}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Attached Medical Clearance Report & PDF Viewer (Simplified 6 Data Fields) */}
-                <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-[20px] text-primary">description</span>
-                        <h3 className="font-display font-bold text-base text-slate-900">
-                          Medical Clearance Report
-                        </h3>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Matched by Iqama #{activeCandidate.iqamaId} &bull; Stored in Central Employee Registry
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {activeCandidate.pdfFileUrl ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-bold">
-                          <span className="material-symbols-outlined text-[16px] text-emerald-600">verified</span>
-                          <span>PDF Report Ingested</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-100 text-amber-800 px-3 py-1 text-xs font-bold">
-                          <span className="material-symbols-outlined text-[16px] text-amber-600">pending</span>
-                          <span>Awaiting PDF Upload</span>
-                        </span>
-                      )}
-
-                      {activeCandidate.pdfFileUrl && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedPdfReport({
-                              employeeName: activeCandidate.name,
-                              reportName: activeCandidate.protocol,
-                              iqamaNumber: activeCandidate.iqamaId,
-                              issueDate: activeCandidate.issueDate,
-                              expiryDate: activeCandidate.expiryDate,
-                              clinicName: currentClinic.name,
-                              pdfUrl: activeCandidate.pdfFileUrl
-                            });
-                          }}
-                          className="flex items-center gap-1.5 rounded-lg bg-primary hover:bg-slate-900 text-white px-3.5 py-1 text-xs font-bold transition-all cursor-pointer shadow-xs"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">visibility</span>
-                          <span>View PDF</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Strictly the 6 Requested Fields */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {/* 1. Employee Name */}
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                        1. Employee Name
-                      </span>
-                      <p className="font-bold text-sm text-slate-900 truncate">{activeCandidate.name}</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">SAP: {activeCandidate.employeeNo}</p>
-                    </div>
-
-                    {/* 2. Name of Report */}
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                        2. Name of Report
-                      </span>
-                      <p className="font-bold text-sm text-slate-900 truncate">{activeCandidate.protocol}</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">Occupational Fitness Protocol</p>
-                    </div>
-
-                    {/* 3. Iqama Number */}
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                        3. Iqama Number
-                      </span>
-                      <p className="font-mono font-bold text-sm text-primary">{activeCandidate.iqamaId}</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">10-Digit Muqeem / National ID</p>
-                    </div>
-
-                    {/* 4. Issue Date */}
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                        4. Issue Date
-                      </span>
-                      <p className="font-mono font-bold text-sm text-slate-900">{activeCandidate.issueDate}</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">Clinical Examination Date</p>
-                    </div>
-
-                    {/* 5. Expiry Date */}
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                        5. Expiry Date
-                      </span>
-                      <p className="font-mono font-bold text-sm text-emerald-700">{activeCandidate.expiryDate}</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">Valid for Site Entry Pass</p>
-                    </div>
-
-                    {/* 6. Medical Center Name */}
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                        6. Medical Center / Clinic
-                      </span>
-                      <p className="font-bold text-sm text-slate-900 truncate">{currentClinic.name}</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">Accredited Healthcare Facility</p>
-                    </div>
-                  </div>
-
-                  {/* PDF Document Viewer / Single Upload Dropzone */}
-                  <div className="mt-2">
-                    {activeCandidate.pdfFileUrl ? (
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                          <div className="flex items-center gap-3">
-                            <div className="h-10 w-10 rounded-lg bg-red-100 text-red-700 flex items-center justify-center font-bold text-xs shrink-0">
-                              PDF
-                            </div>
-                            <div>
-                              <p className="font-mono font-bold text-xs text-slate-900">
-                                {activeCandidate.iqamaId}.pdf
-                              </p>
-                              <p className="text-[11px] text-slate-500">
-                                Attached to Employee #{activeCandidate.employeeNo} ({activeCandidate.name})
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <label className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-semibold cursor-pointer transition-colors">
-                              <span className="material-symbols-outlined text-[15px]">sync</span>
-                              <span>Replace</span>
-                              <input
-                                type="file"
-                                accept=".pdf"
-                                className="hidden"
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (file) handleSinglePdfUpload(activeCandidate, file);
-                                }}
-                              />
-                            </label>
-                            <a
-                              href={activeCandidate.pdfFileUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              download={`${activeCandidate.iqamaId}_medical_report.pdf`}
-                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer transition-colors border border-slate-200"
-                            >
-                              <span className="material-symbols-outlined text-[15px]">download</span>
-                              <span>Download</span>
-                            </a>
+                          <div className="text-sm font-bold text-slate-800">No Single Clearance Requests Assigned</div>
+                          <p className="text-xs text-slate-500 max-w-md mx-auto">
+                            All {bulkCandidates.length} active candidates assigned to {currentClinic.name} belong to bulk-uploaded rosters segregated by request date.
+                          </p>
+                          <div className="flex items-center justify-center gap-2 pt-1">
                             <button
                               type="button"
-                              onClick={() => {
-                                setSelectedPdfReport({
-                                  employeeName: activeCandidate.name,
-                                  reportName: activeCandidate.protocol,
-                                  iqamaNumber: activeCandidate.iqamaId,
-                                  issueDate: activeCandidate.issueDate,
-                                  expiryDate: activeCandidate.expiryDate,
-                                  clinicName: currentClinic.name,
-                                  pdfUrl: activeCandidate.pdfFileUrl
-                                });
-                              }}
-                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary hover:bg-slate-900 text-white text-xs font-bold cursor-pointer transition-colors shadow-xs"
+                              onClick={() => setTableSection('bulk')}
+                              className="px-4 py-2 bg-secondary text-white font-bold text-xs rounded-xl hover:bg-orange-600 transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
                             >
-                              <span className="material-symbols-outlined text-[15px]">open_in_full</span>
-                              <span>Open PDF View</span>
+                              <span className="material-symbols-outlined text-[16px]">group</span>
+                              <span>Switch to Bulk View ({bulkCandidates.length})</span>
                             </button>
                           </div>
                         </div>
+                      );
+                    }
+                    return renderCandidateTable(singleCandidates, false);
+                  }
 
-                        {/* Direct Embedded Preview Iframe */}
-                        <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-100 shadow-inner">
-                          <iframe
-                            src={activeCandidate.pdfFileUrl}
-                            title={`Medical Report - ${activeCandidate.name}`}
-                            className="w-full h-96 border-none"
-                          />
-                        </div>
+                  {/* SECTION 2: BULK VIEW (SEGREGATED BY REQUEST DATE) */}
+                  if (bulkDateGroups.length === 0) {
+                    return (
+                      <div className="py-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                        <p className="text-sm font-semibold">No bulk batch reports match the search criteria.</p>
                       </div>
-                    ) : (
-                      <div className="border-2 border-dashed border-slate-300 hover:border-primary/50 bg-slate-50/70 hover:bg-slate-50 rounded-2xl p-6 text-center transition-all">
-                        <div className="mx-auto h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mb-3">
-                          <span className="material-symbols-outlined text-[28px]">upload_file</span>
-                        </div>
-                        <h4 className="font-bold text-sm text-slate-800">
-                          No PDF Attached for Iqama #{activeCandidate.iqamaId}
-                        </h4>
-                        <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                          Upload the medical report PDF for {activeCandidate.name}. You can also upload a folder of reports at once using the bulk button above.
-                        </p>
-                        <div className="mt-4 flex items-center justify-center gap-3">
-                          <label className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary hover:bg-slate-900 text-white text-xs font-bold cursor-pointer transition-all shadow-sm">
-                            <span className="material-symbols-outlined text-[16px]">add_circle</span>
-                            <span>Upload {activeCandidate.iqamaId}.pdf</span>
-                            <input
-                              type="file"
-                              accept=".pdf"
-                              className="hidden"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) handleSinglePdfUpload(activeCandidate, file);
-                              }}
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedPdfFiles([]);
-                              setUploadResult(null);
-                              setIsBulkUploadModalOpen(true);
-                            }}
-                            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer transition-all border border-slate-200"
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-4">
+                      {bulkDateGroups.map((group) => {
+                        const isExpanded = expandedDateGroups[group.dateKey] !== false;
+                        const percentDone = group.totalCount > 0 ? Math.round((group.doneCount / group.totalCount) * 100) : 0;
+
+                        return (
+                          <div
+                            key={group.dateKey + group.batchTitle}
+                            className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
                           >
-                            <span className="material-symbols-outlined text-[16px]">folder</span>
-                            <span>Upload Folder Instead</span>
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                            {/* BATCH DATE GROUP HEADER */}
+                            <div
+                              onClick={() => toggleDateGroup(group.dateKey)}
+                              className="p-4 sm:p-4.5 bg-slate-50/80 hover:bg-slate-100/80 cursor-pointer flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-b border-slate-200/80 transition-colors select-none"
+                            >
+                              {/* Left: Date & Batch Title */}
+                              <div className="flex items-center gap-3">
+                                <div className="h-10 w-10 rounded-xl bg-teal-50 text-teal-800 border border-teal-200 flex items-center justify-center shrink-0">
+                                  <span className="material-symbols-outlined text-[20px]">calendar_today</span>
+                                </div>
+                                <div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-display font-extrabold text-sm text-slate-900">
+                                      Requested: {group.displayDate}
+                                    </span>
+                                    <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-800">
+                                      {group.batchTitle}
+                                    </span>
+                                    <span className="text-xs text-slate-500 font-medium">
+                                      ({group.totalCount} Employees)
+                                    </span>
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5">
+                                    Segregated workforce clearance cohort sent for testing
+                                  </div>
+                                </div>
+                              </div>
 
-                  {/* Physician Clearance Annotations */}
-                  <div className="rounded-xl border border-slate-200/80 bg-slate-50 p-4">
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                      Physician Clearance Annotations & Medical Notes
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={physicianRemarks}
-                      onChange={(e) => setPhysicianRemarks(e.target.value)}
-                      className="w-full rounded-lg bg-white border border-slate-200 p-2.5 text-xs text-slate-800 leading-relaxed focus:outline-none focus:border-primary shadow-2xs resize-none"
-                      placeholder="Optional remarks or notes for this report..."
-                    />
-                  </div>
-                </div>
+                              {/* Right: Progress & Status Badges */}
+                              <div className="flex flex-wrap items-center gap-3 md:gap-4" onClick={(e) => e.stopPropagation()}>
+                                {/* Mini Progress bar */}
+                                <div className="w-28 sm:w-36">
+                                  <div className="flex items-center justify-between text-[10.5px] mb-1">
+                                    <span className="font-bold text-slate-700">{percentDone}% Done</span>
+                                    <span className="text-slate-400 font-mono">{group.doneCount}/{group.totalCount}</span>
+                                  </div>
+                                  <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                    <div
+                                      className="bg-emerald-600 h-full rounded-full transition-all duration-300"
+                                      style={{ width: `${percentDone}%` }}
+                                    ></div>
+                                  </div>
+                                </div>
+
+                                {/* Done & Pending Checkmark Badges */}
+                                <div className="flex items-center gap-1.5">
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                    <span className="material-symbols-outlined text-[14px] text-emerald-600">check_circle</span>
+                                    <span>{group.doneCount} Done</span>
+                                  </span>
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                    <span className="material-symbols-outlined text-[14px] text-amber-600">hourglass_top</span>
+                                    <span>{group.pendingCount} Pending</span>
+                                  </span>
+                                </div>
+
+                                {/* Expand/Collapse toggle */}
+                                <button
+                                  type="button"
+                                  onClick={() => toggleDateGroup(group.dateKey)}
+                                  className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors"
+                                >
+                                  <span className="material-symbols-outlined text-[20px]">
+                                    {isExpanded ? 'expand_less' : 'expand_more'}
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* BATCH CANDIDATE ROSTER TABLE */}
+                            {isExpanded && (
+                              <div className="p-3 sm:p-4 bg-slate-50/40">
+                                {renderCandidateTable(group.candidates, true)}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
-
-              {/* RIGHT 5 COLS: CERTIFICATION & CARD ISSUANCE ENGINE */}
-              <div className="lg:col-span-5 space-y-5">
-                <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-4">
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-[24px] text-primary">verified</span>
-                      <div>
-                        <h3 className="font-display font-extrabold text-sm text-slate-900">
-                          Certification & Card Issuance
-                        </h3>
-                        <p className="text-[11px] text-slate-400">Direct Gate-Pass Synchronization Module</p>
-                      </div>
-                    </div>
-                    <span className="rounded bg-slate-100 px-2.5 py-1 text-[11px] font-mono text-primary font-extrabold">
-                      STAGE 4 / 4
-                    </span>
-                  </div>
-
-                  {/* 1. Official Fitness Determination */}
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
-                      1. Official Fitness Determination
-                    </label>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      <div
-                        onClick={() => setSelectedFitStatus('FIT')}
-                        className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
-                          selectedFitStatus === 'FIT'
-                            ? 'border-emerald-500 bg-emerald-50/70 ring-2 ring-emerald-500/30'
-                            : 'border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-emerald-900">Fit for Duty</span>
-                          <span className="material-symbols-outlined text-[16px] text-emerald-600">check_circle</span>
-                        </div>
-                        <span className="text-[10px] text-emerald-700 block mt-0.5">Unrestricted clearance</span>
-                      </div>
-
-                      <div
-                        onClick={() => setSelectedFitStatus('CONDITIONAL')}
-                        className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
-                          selectedFitStatus === 'CONDITIONAL'
-                            ? 'border-amber-500 bg-amber-50/70 ring-2 ring-amber-500/30'
-                            : 'border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-amber-900">Conditional</span>
-                          <span className="material-symbols-outlined text-[16px] text-amber-600">report</span>
-                        </div>
-                        <span className="text-[10px] text-amber-700 block mt-0.5">Duty restrictions</span>
-                      </div>
-
-                      <div
-                        onClick={() => setSelectedFitStatus('UNFIT')}
-                        className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
-                          selectedFitStatus === 'UNFIT'
-                            ? 'border-red-500 bg-red-50/70 ring-2 ring-red-500/30'
-                            : 'border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-red-900">Temporarily Unfit</span>
-                          <span className="material-symbols-outlined text-[16px] text-red-600">cancel</span>
-                        </div>
-                        <span className="text-[10px] text-red-700 block mt-0.5">Hold for re-test</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 2. Card Validity Period Selector */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                        2. Certificate & Gate-Pass Validity
-                      </label>
-                      <span className="text-[11px] font-mono text-primary font-bold">
-                        Calculated Expiry: {customExpiryDate}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      {['1 Year (Std)', '2 Years (Petro)', '6 Mo (Cond)', 'Custom Date'].map((t) => (
-                        <button
-                          key={t}
-                          type="button"
-                          onClick={() => handleSelectTerm(t)}
-                          className={`py-2 px-1 text-center rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                            selectedValidityTerm === t
-                              ? 'bg-primary text-white shadow-xs'
-                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                          }`}
-                        >
-                          {t}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="mt-2 flex items-center justify-between rounded-lg bg-slate-50 p-2 text-[11px] border border-slate-200/60">
-                      <span className="text-slate-500">
-                        Effective Start: <strong className="text-slate-800">Today ({new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })})</strong>
-                      </span>
-                      <span className="font-mono text-emerald-700 font-bold">
-                        Term: {selectedValidityTerm.includes('2') ? '730' : selectedValidityTerm.includes('6') ? '180' : '365'} Days Continuous
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* 3. Target Cards to Issue & Synchronize */}
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
-                      3. Target Cards to Issue & Synchronize
-                    </label>
-                    <div className="space-y-2">
-                      <label className="flex items-center justify-between rounded-xl bg-slate-50 p-2.5 border border-slate-200/70 cursor-pointer hover:bg-slate-100/60 transition-colors">
-                        <div className="flex items-center gap-2.5">
-                          <input
-                            type="checkbox"
-                            checked={targetCards.iqama}
-                            onChange={(e) => setTargetCards({ ...targetCards, iqama: e.target.checked })}
-                            className="h-4 w-4 rounded accent-primary text-white"
-                          />
-                          <div>
-                            <p className="text-xs font-bold text-slate-800">Iqama Occupational Fitness Card</p>
-                            <p className="text-[10.5px] text-slate-400">CCHI & MOH Official Labor Registration</p>
-                          </div>
-                        </div>
-                        <span className="text-[10px] font-mono text-emerald-700 font-bold bg-emerald-100 px-1.5 py-0.5 rounded">
-                          READY
-                        </span>
-                      </label>
-
-                      <label className="flex items-center justify-between rounded-xl bg-slate-50 p-2.5 border border-slate-200/70 cursor-pointer hover:bg-slate-100/60 transition-colors">
-                        <div className="flex items-center gap-2.5">
-                          <input
-                            type="checkbox"
-                            checked={targetCards.yanpetRfid}
-                            onChange={(e) => setTargetCards({ ...targetCards, yanpetRfid: e.target.checked })}
-                            className="h-4 w-4 rounded accent-primary text-white"
-                          />
-                          <div>
-                            <p className="text-xs font-bold text-slate-800">Yanpet Site Gate Pass Card (RFID Sync)</p>
-                            <p className="text-[10.5px] text-slate-400">Access control turnstiles Zone 1 through Zone 4</p>
-                          </div>
-                        </div>
-                        <span className="text-[10px] font-mono text-emerald-700 font-bold bg-emerald-100 px-1.5 py-0.5 rounded">
-                          PUSH ACTIVE
-                        </span>
-                      </label>
-
-                      <label className="flex items-center justify-between rounded-xl bg-slate-50 p-2.5 border border-slate-200/70 cursor-pointer hover:bg-slate-100/60 transition-colors">
-                        <div className="flex items-center gap-2.5">
-                          <input
-                            type="checkbox"
-                            checked={targetCards.heavyVehicle}
-                            onChange={(e) => setTargetCards({ ...targetCards, heavyVehicle: e.target.checked })}
-                            className="h-4 w-4 rounded accent-primary text-white"
-                          />
-                          <div>
-                            <p className="text-xs font-bold text-slate-800">Heavy Vehicle Driving Fitness Endorsement</p>
-                            <p className="text-[10.5px] text-slate-400">DOT Equivalent Commercial Logistics</p>
-                          </div>
-                        </div>
-                        <span className="text-[10px] font-mono text-emerald-700 font-bold bg-emerald-100 px-1.5 py-0.5 rounded">
-                          QUALIFIED
-                        </span>
-                      </label>
-
-                      <label className="flex items-center justify-between rounded-xl bg-slate-50 p-2.5 border border-slate-200/70 cursor-pointer hover:bg-slate-100/60 transition-colors">
-                        <div className="flex items-center gap-2.5">
-                          <input
-                            type="checkbox"
-                            checked={targetCards.sabicAccess}
-                            onChange={(e) => setTargetCards({ ...targetCards, sabicAccess: e.target.checked })}
-                            className="h-4 w-4 rounded accent-primary text-white"
-                          />
-                          <div>
-                            <p className="text-xs font-bold text-slate-800">SABIC Multi-Facility Reciprocal Access</p>
-                            <p className="text-[10.5px] text-slate-400">Affiliate refinery cross-entry protocol</p>
-                          </div>
-                        </div>
-                        <span className="text-[10px] font-mono text-slate-500 bg-slate-200 px-1.5 py-0.5 rounded">
-                          OPTIONAL
-                        </span>
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* 4. Physician Digital Signature & Cryptographic Seal */}
-                  <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-9 w-9 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                          <span className="material-symbols-outlined text-[18px]">draw</span>
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-900">{examiningDoctor}</p>
-                          <p className="text-[10.5px] text-slate-500">MOH License #MD-48190 &bull; Chief Medical Officer</p>
-                        </div>
-                      </div>
-
-                      <span className="inline-flex items-center gap-1 rounded bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10.5px] font-bold">
-                        <span className="material-symbols-outlined text-[13px]">lock</span>
-                        <span>PKI SIGNED</span>
-                      </span>
-                    </div>
-
-                    <div className="mt-2 rounded bg-white p-2 text-[10px] font-mono text-slate-500 border border-slate-200/60">
-                      SHA256: 8a4f91e92d88c2...fa791c [Timestamp: {new Date().toISOString().slice(0, 16)}]
-                    </div>
-                  </div>
-
-                  {/* 5. Master Dispatch & Issuance Trigger Button (REAL-TIME DATABASE PUSH) */}
-                  <div className="space-y-2">
-                    {getRecordedCount(activeCandidate.labData) < 6 && !issuedSuccess && (
-                      <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
-                        <span className="material-symbols-outlined text-[18px] text-amber-700 shrink-0 mt-0.5">warning</span>
-                        <p className="leading-snug">
-                          <span className="font-bold">Diagnostics Incomplete:</span> {6 - getRecordedCount(activeCandidate.labData)} of 6 test panels are pending entry. Click <strong>"Enter Diagnostics"</strong> or <strong>"Import Baseline"</strong> before issuing unrestricted clearance.
-                        </p>
-                      </div>
-                    )}
-
-                    <button
-                      id="issueCardBtn"
-                      type="button"
-                      disabled={issuingCard}
-                      onClick={handleCardIssuance}
-                      className={`w-full py-3.5 px-4 rounded-xl font-display font-bold text-sm shadow-md transition-all cursor-pointer flex flex-col items-center justify-center ${
-                        issuedSuccess
-                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                          : 'bg-primary hover:bg-slate-900 text-white'
-                      }`}
-                    >
-                      {issuingCard ? (
-                        <div className="flex items-center gap-2 text-white">
-                          <span className="material-symbols-outlined text-[20px] animate-spin">progress_activity</span>
-                          <span>Synchronizing with Yanpet GatePass API...</span>
-                        </div>
-                      ) : issuedSuccess ? (
-                        <>
-                          <div className="flex items-center gap-1.5 text-white">
-                            <span className="material-symbols-outlined text-[20px]">check_circle</span>
-                            <span>Medical Card Issued & Successfully Synced</span>
-                          </div>
-                          <span className="text-[11px] text-emerald-100 font-normal mt-0.5">
-                            Yanpet Master #{activeCandidate.employeeNo} updated &bull; Gate badge active &bull; Receipt #{issuanceReceipt || 'TX-9941'}
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-1.5">
-                            <span className="material-symbols-outlined text-[20px]">send_and_archive</span>
-                            <span>Approve & Issue Medical Card</span>
-                          </div>
-                          <span className="text-[11px] text-white/80 font-normal mt-0.5">
-                            Instantly pushes clearance to Yanpet Master &bull; Activates site gate badge
-                          </span>
-                        </>
-                      )}
-                    </button>
-
-                    <p className="text-center text-[10.5px] text-slate-400">
-                      Legally binding under KSA Labor Regulations and Yanpet Safety Standard OHS-04.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Digital Health Passport Visual Preview Card */}
-                <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-3">
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                    <span className="text-[11px] uppercase tracking-wider text-slate-400 font-bold">
-                      Digital Health Passport Preview
-                    </span>
-                    <span className="text-[11px] text-emerald-700 font-mono font-bold">
-                      NFC / QR Sync Ready
-                    </span>
-                  </div>
-
-                  <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 to-[#131B35] text-white p-4 shadow-md">
-                    <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-secondary/20 blur-xl"></div>
-                    
-                    <div className="relative z-10 flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-1 text-secondary text-[11px] font-bold tracking-widest uppercase">
-                          <span className="material-symbols-outlined text-[15px]">local_hospital</span>
-                          <span>{currentClinic.name.split(' ')[0]} {currentClinic.name.split(' ')[1]}</span>
-                        </div>
-                        <h4 className="font-display font-extrabold text-sm text-white mt-1 tracking-wide">
-                          YANPET GATE-PASS CLEARANCE
-                        </h4>
-                        <p className="text-[10px] text-slate-400">Petrochemical Facility Operational ID</p>
-                      </div>
-
-                      <div className="h-14 w-14 rounded-lg bg-white p-1 flex items-center justify-center shrink-0 shadow-xs">
-                        <svg className="h-full w-full text-slate-900" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M2 2h8v8H2V2zm2 2v4h4V4H4zm10-2h8v8h-8V2zm2 2v4h4V4h-4zM2 14h8v8H2v-8zm2 2v4h4v-4H4zm14-2h4v2h-4v-2zm-4 0h2v4h-2v-4zm2 4h2v4h-2v-4zm2 2h4v2h-4v-2zm-6 2h2v2h-2v-2zm0-8h2v2h-2v-2z"></path>
-                        </svg>
-                      </div>
-                    </div>
-
-                    <div className="relative z-10 mt-3.5 grid grid-cols-2 gap-2 text-[11px]">
-                      <div>
-                        <span className="text-slate-400 text-[10px] uppercase">Worker Name:</span>
-                        <p className="font-bold text-white leading-tight">{activeCandidate.name}</p>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-[10px] uppercase">Yanpet Badge ID:</span>
-                        <p className="font-mono font-bold text-white leading-tight">YP-LOG-{activeCandidate.employeeNo.replace('E', '')}</p>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-[10px] uppercase">Fitness Class:</span>
-                        <p className="font-bold text-emerald-400 leading-tight">
-                          {selectedFitStatus === 'FIT' ? 'UNRESTRICTED (HEAVY OPS)' : selectedFitStatus}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-[10px] uppercase">Expiry Stamp:</span>
-                        <p className="font-mono font-bold text-secondary leading-tight">{customExpiryDate}</p>
-                      </div>
-                    </div>
-
-                    <div className="relative z-10 mt-3 pt-2.5 border-t border-slate-700/80 flex items-center justify-between text-[10.5px]">
-                      <span className="flex items-center gap-1 text-emerald-400">
-                        <span className="material-symbols-outlined text-[13px]">check_circle</span>
-                        <span>Auto-Sync: {issuedSuccess ? 'Active Pushed' : 'Ready to push'}</span>
-                      </span>
-                      <span className="font-mono text-slate-300">Gate Access: Unlocked</span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleOpenCertificate}
-                    className="w-full py-2.5 px-3 rounded-xl border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-800 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-                  >
-                    <span className="material-symbols-outlined text-[16px] text-primary">description</span>
-                    <span>View & Print Official Medical Certificate</span>
-                  </button>
-
-                  <div className="pt-2 border-t border-slate-100 space-y-1 text-[11px] text-slate-500 font-medium">
-                    <div className="flex items-center justify-between">
-                      <span>Enterprise Gateway Handshake:</span>
-                      <span className="font-mono text-slate-800">200 OK (Yanpet ERP)</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>CCHI Insurance Approval Code:</span>
-                      <span className="font-mono text-slate-800">CCHI-2026-991204</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Turnstile Firmware Relay:</span>
-                      <span className="font-mono text-emerald-600 font-bold">Synchronized (18ms)</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          </div>
         </div>
       )}
 
@@ -2801,17 +2407,23 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Accredited Medical Center</label>
-                <select
-                  value={selectedVendorId}
-                  onChange={(e) => setSelectedVendorId(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-primary"
-                >
-                  {clinics.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.code})
-                    </option>
-                  ))}
-                </select>
+                {userRole === 'ADMIN' ? (
+                  <select
+                    value={selectedVendorId}
+                    onChange={(e) => setSelectedVendorId(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-primary"
+                  >
+                    {clinics.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.code})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="w-full rounded-lg border border-slate-200 bg-slate-100 p-2 text-xs font-semibold text-slate-700">
+                    {currentClinic.name} ({currentClinic.code})
+                  </div>
+                )}
               </div>
 
               <div>
@@ -3054,6 +2666,229 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
           report={selectedPdfReport}
           onClose={() => setSelectedPdfReport(null)}
         />
+      )}
+
+      {/* CONFIRM TEST & CERTIFICATE ISSUANCE MODAL */}
+      {confirmCandidate && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+            {/* Modal Header */}
+            <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-teal-500/20 text-teal-400 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[22px]">verified_user</span>
+                </div>
+                <div>
+                  <h3 className="font-display font-extrabold text-base text-white">
+                    Confirm Medical Test & Certificate Issuance
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Review clinical test outcome before generating official gate-pass certificate
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmCandidate(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-4 text-xs">
+              {/* Candidate Info Card */}
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/90 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="h-10 w-10 rounded-full bg-teal-100 text-teal-900 font-extrabold text-sm flex items-center justify-center shrink-0">
+                    {confirmCandidate.initials}
+                  </span>
+                  <div>
+                    <div className="font-extrabold text-sm text-slate-900">{confirmCandidate.name}</div>
+                    <div className="text-[11px] text-slate-500 font-mono">
+                      SAP: {confirmCandidate.employeeNo} &bull; Iqama: {confirmCandidate.iqamaId}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-teal-50 text-teal-800 border border-teal-200">
+                    {confirmCandidate.protocol}
+                  </span>
+                  <div className="text-[10px] text-slate-400 mt-1">
+                    {confirmCandidate.rawRequest?.vendor?.name || currentClinic.name}
+                  </div>
+                </div>
+              </div>
+
+              {/* Clinical Fitness Determination */}
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-2">
+                  1. Clinical Fitness Determination
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmResult('FIT')}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      confirmResult === 'FIT'
+                        ? 'bg-emerald-50 border-emerald-500 text-emerald-900 ring-2 ring-emerald-500/20'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <span className="material-symbols-outlined text-[16px] text-emerald-600">check_circle</span>
+                      <span>Fit for Duty</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Unrestricted clearance</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setConfirmResult('CONDITIONAL')}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      confirmResult === 'CONDITIONAL'
+                        ? 'bg-amber-50 border-amber-500 text-amber-900 ring-2 ring-amber-500/20'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <span className="material-symbols-outlined text-[16px] text-amber-600">warning</span>
+                      <span>Conditional</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Duty restrictions apply</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setConfirmResult('UNFIT')}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      confirmResult === 'UNFIT'
+                        ? 'bg-rose-50 border-rose-500 text-rose-900 ring-2 ring-rose-500/20'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <span className="material-symbols-outlined text-[16px] text-rose-600">cancel</span>
+                      <span>Unfit</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Hold for re-test</div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Doctor & Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-1">
+                    2. Examining Physician
+                  </label>
+                  <input
+                    type="text"
+                    value={confirmDoctor}
+                    onChange={(e) => setConfirmDoctor(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 font-semibold text-slate-800 focus:outline-none focus:border-teal-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-1">
+                    3. Test Completed Date
+                  </label>
+                  <input
+                    type="date"
+                    value={confirmDate}
+                    onChange={(e) => setConfirmDate(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 font-semibold text-slate-800 focus:outline-none focus:border-teal-700"
+                  />
+                </div>
+              </div>
+
+              {/* Validity Term */}
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-1">
+                  4. Certificate Validity Term
+                </label>
+                <div className="flex items-center gap-2">
+                  {['2 Years (Petro)', '1 Year (Std)', '6 Mo (Cond)'].map((term) => (
+                    <button
+                      key={term}
+                      type="button"
+                      onClick={() => setConfirmValidityTerm(term)}
+                      className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all cursor-pointer border ${
+                        confirmValidityTerm === term
+                          ? 'bg-teal-900 text-white border-teal-900 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      {term}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Remarks */}
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-1">
+                  5. Clinical Remarks & Certification Notes
+                </label>
+                <textarea
+                  rows={2}
+                  value={confirmRemarks}
+                  onChange={(e) => setConfirmRemarks(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-slate-800 focus:outline-none focus:border-teal-700"
+                />
+              </div>
+
+              {/* Certificate Generation Checkbox */}
+              <label className="flex items-start gap-3 p-3.5 rounded-xl bg-teal-50/70 border border-teal-200 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={shouldGenerateCertificate}
+                  onChange={(e) => setShouldGenerateCertificate(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded text-teal-800 focus:ring-teal-700 cursor-pointer"
+                />
+                <div>
+                  <div className="font-bold text-slate-900 text-xs">
+                    Confirm test is completed and generate official Medical Fitness Certificate
+                  </div>
+                  <div className="text-[11px] text-slate-600 mt-0.5">
+                    If unchecked, the candidate will be kept in <strong>Pending Test Results</strong> status with no certificate issued.
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setConfirmCandidate(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-200 transition-colors cursor-pointer"
+              >
+                Keep as Pending Test Results
+              </button>
+
+              <button
+                type="button"
+                disabled={confirmingLoading}
+                onClick={handleConfirmTestCompleted}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-teal-800 hover:bg-teal-900 text-white transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-[16px]">
+                  {shouldGenerateCertificate ? 'verified' : 'save'}
+                </span>
+                <span>
+                  {confirmingLoading
+                    ? 'Processing...'
+                    : shouldGenerateCertificate
+                    ? 'Confirm & Generate Certificate'
+                    : 'Save as Pending Test Results'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* OFFICIAL CERTIFICATE MODAL */}

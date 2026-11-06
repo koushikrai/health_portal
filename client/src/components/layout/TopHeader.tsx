@@ -100,25 +100,91 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
         {/* Right Controls */}
         <div className="flex items-center gap-3">
-          {/* Quick Shortcuts */}
+          {/* Role-Specific Quick Shortcuts */}
           {onNavigateToTab && (
             <div className="hidden md:flex items-center gap-1.5">
-              <button
-                onClick={() => onNavigateToTab('intake')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
-                title="Direct Walk-in Intake Form"
-              >
-                <span className="material-symbols-outlined text-[16px] text-secondary">how_to_reg</span>
-                <span>Walk-in Intake</span>
-              </button>
-              <button
-                onClick={() => onNavigateToTab('requests')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary/10 hover:bg-secondary/20 text-secondary text-xs font-semibold transition-colors cursor-pointer"
-                title="Incoming Corporate Requests Queue"
-              >
-                <span className="material-symbols-outlined text-[16px]">assignment_returned</span>
-                <span>Corporate Queue</span>
-              </button>
+              {(userRole === 'HR' || userRole === 'REQUESTER') && (
+                <>
+                  <button
+                    onClick={() => onNavigateToTab('intake')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold transition-colors cursor-pointer"
+                    title="Workforce Intake & Pre-Booking"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-emerald-700">add_circle</span>
+                    <span>+ New Request / Pre-Book</span>
+                  </button>
+                  <button
+                    onClick={() => onNavigateToTab('requests')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                    title="Track Submitted Requests Queue"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-slate-600">assignment</span>
+                    <span>Requests Queue</span>
+                  </button>
+                </>
+              )}
+
+              {userRole === 'CENTRAL' && (
+                <>
+                  <button
+                    onClick={() => onNavigateToTab('slots')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold transition-colors cursor-pointer"
+                    title="Medical Slot Portal / Allocation Queue"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-emerald-700">calendar_month</span>
+                    <span>Slot Allocation Queue</span>
+                  </button>
+                  <button
+                    onClick={() => onNavigateToTab('requests')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                    title="Corporate Request Queue"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-slate-600">assignment_returned</span>
+                    <span>Corporate Queue</span>
+                  </button>
+                </>
+              )}
+
+              {userRole === 'CLINIC' && (
+                <button
+                  onClick={() => onNavigateToTab('clinic')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold transition-colors cursor-pointer"
+                  title="Accredited Clinic Portal"
+                >
+                  <span className="material-symbols-outlined text-[16px] text-emerald-700">local_hospital</span>
+                  <span>Clinic Examination Desk</span>
+                </button>
+              )}
+
+              {userRole === 'FINANCE' && (
+                <button
+                  onClick={() => onNavigateToTab('finance')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 text-xs font-semibold transition-colors cursor-pointer"
+                  title="Invoice 3-Way Clearance"
+                >
+                  <span className="material-symbols-outlined text-[16px] text-blue-700">receipt_long</span>
+                  <span>Invoice Clearance</span>
+                </button>
+              )}
+
+              {userRole === 'ADMIN' && (
+                <>
+                  <button
+                    onClick={() => onNavigateToTab('slots')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-emerald-700">calendar_month</span>
+                    <span>Slot Portal</span>
+                  </button>
+                  <button
+                    onClick={() => onNavigateToTab('admin')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-slate-700">admin_panel_settings</span>
+                    <span>Administration</span>
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -141,22 +207,31 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <span className="material-symbols-outlined text-[16px] text-slate-400">tune</span>
           </button>
 
-          {/* Role Quick Selector */}
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1 text-xs text-slate-700">
-            <span className="font-semibold text-slate-500">Role:</span>
-            <select
-              value={userRole}
-              onChange={(e) => onSwitchRole(e.target.value)}
-              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
-            >
-              <option value="HR">HR Coordinator</option>
-              <option value="REQUESTER">HSE Coordinator</option>
-              <option value="CENTRAL">Central Medical Team</option>
-              <option value="CLINIC">Clinic Examination Desk</option>
-              <option value="FINANCE">Finance Controller</option>
-              <option value="ADMIN">System Administrator</option>
-            </select>
-          </div>
+          {/* Role Quick Selector (Accessible for Admin Testing / Impersonation) */}
+          {(userRole === 'ADMIN' || localStorage.getItem('ecc_real_role') === 'ADMIN') && (
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1 text-xs text-slate-700 shadow-2xs">
+              <span className="material-symbols-outlined text-[15px] text-secondary">badge</span>
+              <span className="font-semibold text-slate-500 hidden sm:inline">Role:</span>
+              <select
+                value={userRole}
+                onChange={(e) => onSwitchRole(e.target.value)}
+                className="bg-transparent font-bold text-slate-900 focus:outline-none cursor-pointer text-xs"
+                title="Switch active role perspective (Admin Impersonation)"
+              >
+                <option value="ADMIN">System Administrator</option>
+                <option value="CENTRAL">Central Medical Team</option>
+                <option value="HR">HR Coordinator</option>
+                <option value="REQUESTER">HSE Coordinator</option>
+                <option value="CLINIC">Clinic Examination Desk</option>
+                <option value="FINANCE">Finance Controller</option>
+              </select>
+              {userRole !== 'ADMIN' && (
+                <span className="hidden lg:inline text-[9.5px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded ml-1">
+                  Impersonating
+                </span>
+              )}
+            </div>
+          )}
 
           {/* User Profile Capsule */}
           <div className="flex items-center gap-2.5 pl-2 border-l border-slate-200">

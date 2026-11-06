@@ -8,6 +8,7 @@ import { ReportsController, uploadReportsMulter } from '../controllers/reportsCo
 import { InvoicesController } from '../controllers/invoicesController';
 import { AuditController } from '../controllers/auditController';
 import { AdminController } from '../controllers/adminController';
+import { SlotsController } from '../controllers/slotsController';
 import { authenticate, requireRole } from '../middlewares/auth';
 import { Role } from '@prisma/client';
 
@@ -23,7 +24,7 @@ router.get('/health', DashboardController.getHealth);
 // ==========================================
 router.post('/auth/login', AuthController.login);
 router.get('/auth/me', authenticate, AuthController.me);
-router.post('/auth/switch-role', AuthController.switchRole);
+router.post('/auth/switch-role', authenticate, requireRole([Role.ADMIN]), AuthController.switchRole);
 
 // ==========================================
 // 2. Dashboard & KPI Analytics
@@ -59,6 +60,7 @@ router.get('/masters/rates', authenticate, MastersController.getRates);
 // 5. Medical Clearance Requests & Triage
 // ==========================================
 router.get('/requests', authenticate, RequestsController.list);
+router.get('/requests/batches', authenticate, RequestsController.listBatches);
 router.post(
   '/requests',
   authenticate,
@@ -98,6 +100,7 @@ router.patch(
 router.patch(
   '/requests/:id',
   authenticate,
+  requireRole([Role.CLINIC, Role.CENTRAL]),
   RequestsController.update
 );
 
@@ -105,6 +108,7 @@ router.patch(
 // 6. Reports & Medical Fitness Certificates
 // ==========================================
 router.get('/reports', authenticate, ReportsController.list);
+router.get('/clearance/workforce', authenticate, ReportsController.getWorkforceClearance);
 router.post(
   '/reports',
   authenticate,
@@ -114,6 +118,7 @@ router.post(
 router.post(
   '/reports/bulk-upload',
   authenticate,
+  requireRole([Role.CLINIC]),
   uploadReportsMulter.array('files', 150),
   ReportsController.bulkUploadPdf
 );
@@ -178,5 +183,29 @@ router.patch('/admin/clinics/:id', authenticate, requireRole([Role.ADMIN]), Admi
 router.post('/admin/contracts', authenticate, requireRole([Role.ADMIN]), AdminController.createContract);
 router.post('/admin/rates', authenticate, requireRole([Role.ADMIN]), AdminController.addContractRate);
 router.delete('/admin/rates/:id', authenticate, requireRole([Role.ADMIN]), AdminController.deleteContractRate);
+
+router.get('/admin/settings', authenticate, requireRole([Role.ADMIN]), AdminController.getSettings);
+router.patch('/admin/settings', authenticate, requireRole([Role.ADMIN]), AdminController.updateSettings);
+router.post('/admin/slots/:id/expire', authenticate, requireRole([Role.ADMIN]), AdminController.expireSlot);
+router.post('/admin/slots/:id/restore', authenticate, requireRole([Role.ADMIN]), AdminController.restoreSlot);
+
+// ==========================================
+// 10. Medical Slot Portal & Advance Pre-Booking
+// ==========================================
+router.get('/slots/queue', authenticate, SlotsController.listQueue);
+router.post(
+  '/slots/request',
+  authenticate,
+  requireRole([Role.HR, Role.REQUESTER, Role.CENTRAL, Role.ADMIN]),
+  SlotsController.createRequest
+);
+router.post(
+  '/slots/:id/allocate',
+  authenticate,
+  requireRole([Role.CENTRAL, Role.ADMIN, Role.HR]),
+  SlotsController.allocateSlots
+);
+router.get('/slots/by-clinic', authenticate, SlotsController.listByClinic);
+router.get('/slots/price-comparison', authenticate, SlotsController.priceComparison);
 
 export default router;

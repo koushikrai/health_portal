@@ -27,13 +27,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', allowedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'FINANCE', 'ADMIN'] },
-    { id: 'intake', label: 'New Request', icon: 'add_circle', allowedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'ADMIN'] },
+    { id: 'intake', label: 'New Request & Pre-Booking', icon: 'add_circle', allowedRoles: ['HR', 'REQUESTER', 'ADMIN'] },
+    { id: 'slots', label: 'Slot Allocation Queue', icon: 'calendar_month', badge: 'Quota', allowedRoles: ['CENTRAL', 'ADMIN'] },
     { id: 'requests', label: 'Requests Queue', icon: 'assignment', badge: 'Active', allowedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'ADMIN'] },
-    { id: 'reports', label: 'Report Library', icon: 'folder_shared', allowedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'CLINIC', 'FINANCE', 'ADMIN'] },
+    { id: 'reports', label: 'Medical Clearance', icon: 'verified_user', allowedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'ADMIN'] },
     { id: 'clinic', label: 'Clinic Portal', icon: 'local_hospital', allowedRoles: ['CLINIC', 'ADMIN'] },
     { id: 'finance', label: 'Invoice Clearance', icon: 'receipt_long', allowedRoles: ['FINANCE', 'ADMIN'] },
-    { id: 'suppliers', label: 'Clinics & Contracts', icon: 'domain', allowedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'CLINIC', 'FINANCE', 'ADMIN'] },
-    { id: 'audit', label: 'System Audit Log', icon: 'history', allowedRoles: ['HR', 'CENTRAL', 'FINANCE', 'ADMIN'] },
+    { id: 'suppliers', label: 'Clinics & Contracts', icon: 'domain', allowedRoles: ['CENTRAL', 'FINANCE', 'ADMIN'] },
+    { id: 'audit', label: 'System Audit Log', icon: 'history', allowedRoles: ['ADMIN'] },
     { id: 'admin', label: 'Administration', icon: 'admin_panel_settings', badge: 'Master', allowedRoles: ['ADMIN'] },
   ];
 
@@ -43,7 +44,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   });
 
   return (
-    <aside className="w-64 bg-[#0A0F1D] text-white flex flex-col justify-between border-r border-slate-800 shrink-0 select-none min-h-screen">
+    <aside className="w-64 bg-[#0A0F1D] text-white flex flex-col justify-between border-r border-slate-800 shrink-0 select-none sticky top-0 h-screen overflow-y-auto z-40">
       <div>
         {/* Brand Header */}
         <div className="px-5 py-5 flex items-center justify-between border-b border-slate-800/60">
@@ -112,28 +113,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* Sidebar Footer: Active Role Switcher & Sign Out */}
+      {/* Sidebar Footer: Active Role Switcher (Admin Impersonation) & Sign Out */}
       <div className="p-3 border-t border-slate-800/60 bg-[#080C17]">
-        <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-2.5 mb-2">
-          <div className="flex items-center justify-between mb-1.5 text-[10px] text-slate-400 uppercase font-semibold">
-            <div className="flex items-center gap-1">
-              <span className="material-symbols-outlined text-[14px]">sync_alt</span>
-              <span>Fast Role Switcher</span>
+        {(userRole === 'ADMIN' || localStorage.getItem('ecc_real_role') === 'ADMIN') && (
+          <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-2.5 mb-2">
+            <div className="flex items-center justify-between mb-1.5 text-[10px] text-slate-400 uppercase font-semibold">
+              <div className="flex items-center gap-1">
+                <span className="material-symbols-outlined text-[14px] text-secondary">sync_alt</span>
+                <span>Active Role Switcher</span>
+              </div>
+              <span className="text-[9.5px] px-1 rounded bg-secondary/20 text-secondary font-mono font-bold">
+                {userRole === 'ADMIN' ? 'MASTER' : 'IMPERSONATING'}
+              </span>
             </div>
+            <select
+              value={userRole}
+              onChange={(e) => onSwitchRole(e.target.value)}
+              className="w-full bg-[#0D121F] text-white text-xs font-semibold rounded-lg px-2.5 py-1.5 border border-slate-700/80 focus:outline-none focus:border-secondary cursor-pointer"
+            >
+              <option value="ADMIN">System Administrator</option>
+              <option value="CENTRAL">Central Medical Team</option>
+              <option value="HR">HR Coordinator</option>
+              <option value="REQUESTER">HSE Coordinator</option>
+              <option value="CLINIC">Clinic Desk (GAMC / BAK)</option>
+              <option value="FINANCE">Finance Controller</option>
+            </select>
           </div>
-          <select
-            value={userRole}
-            onChange={(e) => onSwitchRole(e.target.value)}
-            className="w-full bg-[#0D121F] text-white text-xs font-semibold rounded-lg px-2.5 py-1.5 border border-slate-700/80 focus:outline-none focus:border-secondary cursor-pointer"
-          >
-            <option value="HR">HR Coordinator</option>
-            <option value="REQUESTER">HSE Coordinator</option>
-            <option value="CENTRAL">Central Medical Team</option>
-            <option value="CLINIC">Clinic Desk (GAMC / BAK)</option>
-            <option value="FINANCE">Finance Controller</option>
-            <option value="ADMIN">System Administrator</option>
-          </select>
-        </div>
+        )}
 
         {/* User Card with Sign Out */}
         <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-slate-900/40 text-xs">

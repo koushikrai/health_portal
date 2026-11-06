@@ -10,15 +10,20 @@ const reportsController_1 = require("../controllers/reportsController");
 const invoicesController_1 = require("../controllers/invoicesController");
 const auditController_1 = require("../controllers/auditController");
 const adminController_1 = require("../controllers/adminController");
+const slotsController_1 = require("../controllers/slotsController");
 const auth_1 = require("../middlewares/auth");
 const client_1 = require("@prisma/client");
 const router = (0, express_1.Router)();
+// ==========================================
+// 0. System Telemetry & 3-Tier Health Check
+// ==========================================
+router.get('/health', dashboardController_1.DashboardController.getHealth);
 // ==========================================
 // 1. Authentication & Session Endpoints
 // ==========================================
 router.post('/auth/login', authController_1.AuthController.login);
 router.get('/auth/me', auth_1.authenticate, authController_1.AuthController.me);
-router.post('/auth/switch-role', authController_1.AuthController.switchRole);
+router.post('/auth/switch-role', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.ADMIN]), authController_1.AuthController.switchRole);
 // ==========================================
 // 2. Dashboard & KPI Analytics
 // ==========================================
@@ -40,19 +45,21 @@ router.get('/masters/rates', auth_1.authenticate, mastersController_1.MastersCon
 // 5. Medical Clearance Requests & Triage
 // ==========================================
 router.get('/requests', auth_1.authenticate, requestsController_1.RequestsController.list);
+router.get('/requests/batches', auth_1.authenticate, requestsController_1.RequestsController.listBatches);
 router.post('/requests', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.HR, client_1.Role.REQUESTER, client_1.Role.CENTRAL]), requestsController_1.RequestsController.create);
 router.post('/requests/bulk', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.HR, client_1.Role.REQUESTER, client_1.Role.CENTRAL]), requestsController_1.RequestsController.bulkCreate);
 router.patch('/requests/batch-assign', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.CENTRAL]), requestsController_1.RequestsController.batchAssign);
 router.patch('/requests/:id/schedule', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.CLINIC, client_1.Role.CENTRAL, client_1.Role.HR, client_1.Role.REQUESTER]), requestsController_1.RequestsController.scheduleAppointment);
 router.patch('/requests/:id/cancel', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.HR, client_1.Role.REQUESTER, client_1.Role.CENTRAL]), requestsController_1.RequestsController.cancel);
 router.patch('/requests/:id/reject', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.CENTRAL]), requestsController_1.RequestsController.reject);
-router.patch('/requests/:id', auth_1.authenticate, requestsController_1.RequestsController.update);
+router.patch('/requests/:id', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.CLINIC, client_1.Role.CENTRAL]), requestsController_1.RequestsController.update);
 // ==========================================
 // 6. Reports & Medical Fitness Certificates
 // ==========================================
 router.get('/reports', auth_1.authenticate, reportsController_1.ReportsController.list);
+router.get('/clearance/workforce', auth_1.authenticate, reportsController_1.ReportsController.getWorkforceClearance);
 router.post('/reports', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.CLINIC]), reportsController_1.ReportsController.submitResult);
-router.post('/reports/bulk-upload', auth_1.authenticate, reportsController_1.uploadReportsMulter.array('files', 150), reportsController_1.ReportsController.bulkUploadPdf);
+router.post('/reports/bulk-upload', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.CLINIC]), reportsController_1.uploadReportsMulter.array('files', 150), reportsController_1.ReportsController.bulkUploadPdf);
 router.get('/reports/:id/certificate', auth_1.authenticate, reportsController_1.ReportsController.getCertificate);
 // ==========================================
 // 7. Finance Invoicing & 3-Way Match
@@ -79,4 +86,16 @@ router.patch('/admin/clinics/:id', auth_1.authenticate, (0, auth_1.requireRole)(
 router.post('/admin/contracts', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.ADMIN]), adminController_1.AdminController.createContract);
 router.post('/admin/rates', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.ADMIN]), adminController_1.AdminController.addContractRate);
 router.delete('/admin/rates/:id', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.ADMIN]), adminController_1.AdminController.deleteContractRate);
+router.get('/admin/settings', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.ADMIN]), adminController_1.AdminController.getSettings);
+router.patch('/admin/settings', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.ADMIN]), adminController_1.AdminController.updateSettings);
+router.post('/admin/slots/:id/expire', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.ADMIN]), adminController_1.AdminController.expireSlot);
+router.post('/admin/slots/:id/restore', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.ADMIN]), adminController_1.AdminController.restoreSlot);
+// ==========================================
+// 10. Medical Slot Portal & Advance Pre-Booking
+// ==========================================
+router.get('/slots/queue', auth_1.authenticate, slotsController_1.SlotsController.listQueue);
+router.post('/slots/request', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.HR, client_1.Role.REQUESTER, client_1.Role.CENTRAL, client_1.Role.ADMIN]), slotsController_1.SlotsController.createRequest);
+router.post('/slots/:id/allocate', auth_1.authenticate, (0, auth_1.requireRole)([client_1.Role.CENTRAL, client_1.Role.ADMIN, client_1.Role.HR]), slotsController_1.SlotsController.allocateSlots);
+router.get('/slots/by-clinic', auth_1.authenticate, slotsController_1.SlotsController.listByClinic);
+router.get('/slots/price-comparison', auth_1.authenticate, slotsController_1.SlotsController.priceComparison);
 exports.default = router;

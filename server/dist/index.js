@@ -9,6 +9,7 @@ const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const routes_1 = __importDefault(require("./routes"));
+const prisma_1 = __importDefault(require("./prisma"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
@@ -57,7 +58,25 @@ process.on('unhandledRejection', (reason) => {
 process.on('uncaughtException', (err) => {
     console.warn('[Server Warning] Handled uncaught exception:', err?.message || err);
 });
-app.listen(PORT, () => {
-    console.log(`[ECC Health Portal API] running on port ${PORT}`);
-});
+// Neon Serverless compute keep-alive heartbeat to prevent auto-suspend 57P01 termination
+const HEARTBEAT_INTERVAL_MS = 120_000; // Every 2 minutes
+const heartbeatTimer = setInterval(async () => {
+    try {
+        await prisma_1.default.$queryRaw `SELECT 1`;
+    }
+    catch (err) {
+        console.warn('[DB Heartbeat] Reconnecting to Neon PostgreSQL:', err?.message || err);
+        try {
+            await prisma_1.default.$disconnect();
+            await prisma_1.default.$connect();
+        }
+        catch (_) { }
+    }
+}, HEARTBEAT_INTERVAL_MS);
+heartbeatTimer.unref();
+if (process.env.NODE_ENV !== 'test') {
+    app.listen(PORT, () => {
+        console.log(`[ECC Health Portal API] running on port ${PORT}`);
+    });
+}
 exports.default = app;

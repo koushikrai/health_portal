@@ -24,10 +24,7 @@ export class AuthController {
         return res.status(401).json({ error: 'Invalid credentials or inactive account' });
       }
 
-      let isMatch = await bcrypt.compare(password, user.passwordHash);
-      if (!isMatch && (password === 'password123' || password === 'Exp@2026' || password === 'admin123' || password === 'Admin@2026')) {
-        isMatch = true;
-      }
+      const isMatch = await bcrypt.compare(password, user.passwordHash);
       if (!isMatch) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
@@ -86,7 +83,8 @@ export class AuthController {
           name: user.name,
           role: user.role,
           vendorId: user.vendorId,
-          vendor: user.vendor
+          vendor: user.vendor,
+          impersonatorId: (req.user as any)?.impersonatorId || null
         }
       });
     } catch (e: any) {
@@ -96,7 +94,40 @@ export class AuthController {
 
   static async switchRole(req: Request, res: Response) {
     try {
+      const isAllowed = req.user?.role === 'ADMIN' || !!(req.user as any)?.impersonatorId;
+      if (!isAllowed) {
+        return res.status(403).json({ error: 'Forbidden: Only administrators can switch roles' });
+      }
+      const adminId = (req.user as any)?.impersonatorId || req.user!.id;
       const { targetRole, vendorId } = req.body;
+
+      if (targetRole === 'ADMIN') {
+        const adminUser = await prisma.user.findUnique({
+          where: { id: adminId },
+          include: { vendor: true }
+        });
+
+        if (!adminUser) {
+          return res.status(404).json({ error: 'Admin account not found' });
+        }
+
+        const payload = {
+          id: adminUser.id,
+          username: adminUser.username,
+          name: adminUser.name,
+          role: adminUser.role,
+          vendorId: adminUser.vendorId
+        };
+        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+
+        return res.json({
+          token,
+          user: {
+            ...payload,
+            vendor: adminUser.vendor
+          }
+        });
+      }
       
       let userQuery: any = { role: targetRole as Role, isActive: true };
       if (vendorId) {
@@ -119,12 +150,13 @@ export class AuthController {
         return res.status(404).json({ error: `No active user found for role ${targetRole}` });
       }
 
-      const payload = {
+      const payload: any = {
         id: user.id,
         username: user.username,
         name: user.name,
         role: user.role,
-        vendorId: user.vendorId
+        vendorId: user.vendorId,
+        impersonatorId: adminId
       };
 
       const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });

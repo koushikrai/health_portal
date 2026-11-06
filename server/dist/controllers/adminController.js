@@ -8,6 +8,7 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const prisma_1 = __importDefault(require("../prisma"));
 const client_1 = require("@prisma/client");
 const auditService_1 = require("../services/auditService");
+const settingsService_1 = require("../services/settingsService");
 class AdminController {
     // ==========================================
     // 1. Users Management
@@ -400,6 +401,147 @@ class AdminController {
                 totalReports,
                 totalInvoices,
                 roleBreakdown
+            });
+        }
+        catch (e) {
+            return res.status(500).json({ error: e.message });
+        }
+    }
+    // ==========================================
+    // 5. System Settings & Slot Expiry Governance
+    // ==========================================
+    static async getSettings(req, res) {
+        try {
+            const settings = await settingsService_1.SettingsService.getSettings();
+            const expiryDays = settings.slotExpiryDays || 7;
+            // Query all slot requests to assess active vs expired status
+            const slotRequests = await prisma_1.default.slotRequest.findMany({
+                include: {
+                    test: true,
+                    allocations: {
+                        include: { vendor: true }
+                    }
+                },
+                orderBy: { createdAt: 'desc' }
+            });
+            const now = new Date();
+            const slotsWithExpiry = slotRequests.map(sr => {
+                const createdDate = new Date(sr.createdAt);
+                const ageMs = now.getTime() - createdDate.getTime();
+                const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+                const isExpired = sr.status === 'EXPIRED' || (settings.autoExpireSlots && ageDays >= expiryDays);
+                const daysRemaining = Math.max(0, expiryDays - ageDays);
+                return {
+                    id: sr.id,
+                    title: sr.title,
+                    testName: sr.test?.name || sr.title,
+                    department: sr.department,
+                    plant: sr.plant,
+                    requestedSlots: sr.requestedSlots,
+                    allocatedSlots: sr.allocatedSlots,
+                    status: isExpired ? 'EXPIRED' : sr.status,
+                    createdAt: sr.createdAt,
+                    ageDays,
+                    daysRemaining,
+                    isExpired,
+                    autoDisappearDate: new Date(createdDate.getTime() + expiryDays * 86400000).toISOString()
+                };
+            });
+            const totalSlots = slotsWithExpiry.length;
+            const expiredSlots = slotsWithExpiry.filter(s => s.isExpired).length;
+            const activeSlots = totalSlots - expiredSlots;
+            return res.json({
+                settings,
+                stats: {
+                    totalSlots,
+                    activeSlots,
+                    expiredSlots,
+                    slotExpiryDays: expiryDays
+                },
+                slots: slotsWithExpiry
+            });
+        }
+        catch (e) {
+            return res.status(500).json({ error: e.message });
+        }
+    }
+    static async updateSettings(req, res) {
+        try {
+            const { slotExpiryDays, autoExpireSlots, slotExpiryBasis, autoArchiveCompleted } = req.body;
+            const updated = await settingsService_1.SettingsService.updateSettings({
+                slotExpiryDays: slotExpiryDays !== undefined ? Number(slotExpiryDays) : undefined,
+                autoExpireSlots: autoExpireSlots !== undefined ? Boolean(autoExpireSlots) : undefined,
+                slotExpiryBasis: slotExpiryBasis !== undefined ? slotExpiryBasis : undefined,
+                autoArchiveCompleted: autoArchiveCompleted !== undefined ? Boolean(autoArchiveCompleted) : undefined
+            }, req.user?.name || 'Administrator');
+            await auditService_1.AuditService.log({
+                userId: req.user?.id,
+                actorName: req.user?.name || 'Administrator',
+                role: client_1.Role.ADMIN,
+                action: 'UPDATE_SYSTEM_SETTINGS',
+                entityType: 'SystemConfig',
+                entityId: 'SLOT_EXPIRY_CONFIG',
+                details: `Configured slot auto-disappearance window to ${updated.slotExpiryDays} days (Auto-expire: ${updated.autoExpireSlots})`
+            });
+            return res.json({ settings: updated });
+        }
+        catch (e) {
+            return res.status(500).json({ error: e.message });
+        }
+    }
+    static async expireSlot(req, res) {
+        try {
+            const { id } = req.params;
+            const slotRequest = await prisma_1.default.slotRequest.findUnique({ where: { id } });
+            if (!slotRequest) {
+                return res.status(404).json({ error: 'Slot request not found' });
+            }
+            await prisma_1.default.slotRequest.update({
+                where: { id },
+                data: { status: 'EXPIRED' }
+            });
+            await auditService_1.AuditService.log({
+                userId: req.user?.id,
+                actorName: req.user?.name || 'Administrator',
+                role: client_1.Role.ADMIN,
+                action: 'EXPIRE_SLOT_REQUEST',
+                entityType: 'SlotRequest',
+                entityId: id,
+                details: `Admin manually expired slot request '${id}', causing it to disappear from active allocation queue`
+            });
+            return res.json({ message: `Slot request '${id}' marked as EXPIRED (disappeared from queue)` });
+        }
+        catch (e) {
+            return res.status(500).json({ error: e.message });
+        }
+    }
+    static async restoreSlot(req, res) {
+        try {
+            const { id } = req.params;
+            const slotRequest = await prisma_1.default.slotRequest.findUnique({ where: { id } });
+            if (!slotRequest) {
+                return res.status(404).json({ error: 'Slot request not found' });
+            }
+            const settings = await settingsService_1.SettingsService.getSettings();
+            const updated = await prisma_1.default.slotRequest.update({
+                where: { id },
+                data: {
+                    status: 'PENDING',
+                    createdAt: new Date()
+                }
+            });
+            await auditService_1.AuditService.log({
+                userId: req.user?.id,
+                actorName: req.user?.name || 'Administrator',
+                role: client_1.Role.ADMIN,
+                action: 'RESTORE_SLOT_REQUEST',
+                entityType: 'SlotRequest',
+                entityId: id,
+                details: `Admin restored slot request '${id}', resetting its lifecycle for ${settings.slotExpiryDays} days`
+            });
+            return res.json({
+                message: `Slot request '${id}' restored to active queue for ${settings.slotExpiryDays} days`,
+                slotRequest: updated
             });
         }
         catch (e) {

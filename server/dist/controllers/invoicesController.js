@@ -17,11 +17,11 @@ class InvoicesController {
                 where.status = status;
             }
             // Vendor filtering:
-            if (vendorId && vendorId !== 'ALL') {
-                where.vendorId = vendorId;
+            if (req.user?.role === 'CLINIC') {
+                where.vendorId = req.user.vendorId || '__NO_VENDOR__';
             }
-            else if (req.user?.role === 'CLINIC' && req.user.vendorId) {
-                where.vendorId = req.user.vendorId;
+            else if (vendorId && vendorId !== 'ALL') {
+                where.vendorId = vendorId;
             }
             const invoices = await prisma_1.default.invoice.findMany({
                 where,
@@ -49,8 +49,14 @@ class InvoicesController {
             if (!invoiceNo || !vendorId || !Array.isArray(requestIds) || requestIds.length === 0) {
                 return res.status(400).json({ error: 'invoiceNo, vendorId, and requestIds array required' });
             }
-            // Facility vendor ID
-            const effectiveVendorId = vendorId || ((req.user?.role === 'CLINIC' && req.user.vendorId) ? req.user.vendorId : 'V1');
+            // Facility vendor ID guardrail
+            let effectiveVendorId = vendorId;
+            if (req.user?.role === 'CLINIC') {
+                if (req.user.vendorId && vendorId && vendorId !== req.user.vendorId) {
+                    return res.status(403).json({ error: 'Forbidden: Cannot submit invoice for another clinic' });
+                }
+                effectiveVendorId = req.user.vendorId || vendorId;
+            }
             // Fetch completed requests
             const requests = await prisma_1.default.medicalRequest.findMany({
                 where: {

@@ -89,6 +89,7 @@ model Vendor {
   reports         MedicalReport[]
   invoices        Invoice[]
   users           User[]
+  slotAllocations SlotAllocation[]
 }
 
 model Employee {
@@ -131,6 +132,7 @@ model MedicalTest {
   requests       MedicalRequest[]
   reports        MedicalReport[]
   rates          ContractRate[]
+  slotRequests   SlotRequest[]
 }
 
 model Contract {
@@ -254,4 +256,36 @@ model AuditLog {
   entityType String
   entityId   String?
   details    String
+}
+
+model SlotRequest {
+  id              String           @id // e.g. "SR-1007"
+  title           String           // e.g. "Sadara Medical" or test name
+  testId          String?
+  test            MedicalTest?     @relation(fields: [testId], references: [id])
+  department      String           @default("PMTA") // e.g. "PMTA", "CIVIL", "MAINTENANCE"
+  plant           String?          // e.g. "Sadara Complex", "Yanpet Plant"
+  requestedSlots  Int              // e.g. 50, 10, 20
+  allocatedSlots  Int              @default(0) // total slots currently allocated across clinics
+  needByDate      DateTime?
+  status          String           @default("PENDING") // PENDING, ALLOCATED, CONFIRMED
+  note            String?
+  createdById     String?
+  createdByName   String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  allocations     SlotAllocation[]
+}
+
+model SlotAllocation {
+  id             String       @id @default(uuid())
+  slotRequestId  String
+  slotRequest    SlotRequest  @relation(fields: [slotRequestId], references: [id], onDelete: Cascade)
+  vendorId       String       // "V1", "V2", "V3", "V4", "V5"
+  vendor         Vendor       @relation(fields: [vendorId], references: [id])
+  allocatedSlots Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([slotRequestId, vendorId])
 }

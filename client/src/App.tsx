@@ -12,6 +12,7 @@ import { AuditLogView } from './views/AuditLogView';
 import { ReportsView } from './views/ReportsView';
 import { LoginView } from './views/LoginView';
 import { AdminView } from './views/AdminView';
+import { SlotPortalView } from './views/SlotPortalView';
 import { AccessRestrictedGuardrail } from './components/common/AccessRestrictedGuardrail';
 import { api } from './api/client';
 
@@ -23,32 +24,32 @@ export interface RoleConfig {
 
 export const ROLE_CONFIGS: Record<string, RoleConfig> = {
   HR: {
-    allowedTabs: ['dashboard', 'intake', 'requests', 'reports', 'suppliers'],
+    allowedTabs: ['dashboard', 'intake', 'requests', 'reports'],
     defaultTab: 'dashboard',
     label: 'HR Coordinator'
   },
   REQUESTER: {
-    allowedTabs: ['dashboard', 'intake', 'requests', 'reports', 'suppliers'],
+    allowedTabs: ['dashboard', 'intake', 'requests', 'reports'],
     defaultTab: 'intake',
     label: 'HSE Coordinator'
   },
   CENTRAL: {
-    allowedTabs: ['dashboard', 'requests', 'intake', 'reports', 'suppliers', 'audit'],
-    defaultTab: 'requests',
+    allowedTabs: ['slots', 'requests', 'reports', 'suppliers', 'dashboard'],
+    defaultTab: 'slots',
     label: 'Central Medical Team'
   },
   CLINIC: {
-    allowedTabs: ['clinic', 'reports', 'suppliers'],
+    allowedTabs: ['clinic'],
     defaultTab: 'clinic',
     label: 'Accredited Medical Center'
   },
   FINANCE: {
-    allowedTabs: ['dashboard', 'finance', 'reports', 'suppliers', 'audit'],
+    allowedTabs: ['finance', 'dashboard', 'suppliers'],
     defaultTab: 'finance',
     label: 'Finance Controller'
   },
   ADMIN: {
-    allowedTabs: ['dashboard', 'intake', 'requests', 'reports', 'clinic', 'finance', 'suppliers', 'audit', 'admin'],
+    allowedTabs: ['dashboard', 'intake', 'slots', 'requests', 'reports', 'clinic', 'finance', 'suppliers', 'audit', 'admin'],
     defaultTab: 'admin',
     label: 'System Administrator'
   }
@@ -97,6 +98,13 @@ export function App() {
         setUserName(res.data.user.name);
         setVendorId(res.data.user.vendorId || null);
 
+        const isRealAdmin = res.data.user.role === 'ADMIN' || !!res.data.user.impersonatorId;
+        if (isRealAdmin) {
+          localStorage.setItem('ecc_real_role', 'ADMIN');
+        } else {
+          localStorage.removeItem('ecc_real_role');
+        }
+
         const allowed = ROLE_CONFIGS[res.data.user.role]?.allowedTabs || ['dashboard'];
         if (currentPathSegment && !allowed.includes(currentPathSegment) && res.data.user.role !== 'ADMIN') {
           navigate(`/${ROLE_CONFIGS[res.data.user.role]?.defaultTab || 'dashboard'}`, { replace: true });
@@ -106,6 +114,7 @@ export function App() {
       }
     } catch (e) {
       localStorage.removeItem('ecc_token');
+      localStorage.removeItem('ecc_real_role');
       setIsAuthenticated(false);
     } finally {
       setCheckingAuth(false);
@@ -118,6 +127,12 @@ export function App() {
     setUserName(user.name);
     setVendorId(user.vendorId || null);
     
+    if (user.role === 'ADMIN') {
+      localStorage.setItem('ecc_real_role', 'ADMIN');
+    } else {
+      localStorage.removeItem('ecc_real_role');
+    }
+
     // Auto-navigate to role's designated landing module with real URL update
     const targetDefault = ROLE_CONFIGS[user.role]?.defaultTab || 'dashboard';
     navigate(`/${targetDefault}`, { replace: true });
@@ -125,6 +140,7 @@ export function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('ecc_token');
+    localStorage.removeItem('ecc_real_role');
     setIsAuthenticated(false);
     setUserName('');
     setVendorId(null);
@@ -179,6 +195,7 @@ export function App() {
     intake: 'New Request',
     requests: 'Requests Queue',
     reports: 'Report Library',
+    slots: 'Medical Slot Portal',
     clinic: 'Clinic Portal',
     finance: 'Invoice Clearance',
     suppliers: 'Clinics & Contracts',
@@ -190,7 +207,7 @@ export function App() {
   const isTabAllowed = userRole === 'ADMIN' || allowedTabs.includes(currentTab);
 
   return (
-    <div className="flex min-h-screen bg-surface">
+    <div className="flex h-screen overflow-hidden bg-surface">
       {/* Dark Navy Sidebar connected with real browser routes */}
       <Sidebar
         currentTab={currentTab}
@@ -202,7 +219,7 @@ export function App() {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         <TopHeader
           currentTabLabel={tabLabels[currentTab] || 'Dashboard'}
           userRole={userRole}
@@ -235,6 +252,7 @@ export function App() {
               <Route path="/intake" element={<IntakeView />} />
               <Route path="/requests" element={<RequestsQueueView userRole={userRole} />} />
               <Route path="/reports" element={<ReportsView />} />
+              <Route path="/slots" element={<SlotPortalView userRole={userRole} userName={userName} onSwitchRole={handleSwitchRole} />} />
               <Route
                 path="/clinic"
                 element={
