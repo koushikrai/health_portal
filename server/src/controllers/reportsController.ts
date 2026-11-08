@@ -1,7 +1,12 @@
 import { Request, Response } from 'express';
-import prisma from '../prisma';
 import { ReportResult, RequestStatus } from '@prisma/client';
 import { AuditService } from '../services/auditService';
+import { StorageService } from '../services/storageService';
+import { ReportRepository } from '../repositories/reportRepository';
+import { RequestRepository } from '../repositories/requestRepository';
+import { EmployeeRepository } from '../repositories/employeeRepository';
+import { VendorRepository } from '../repositories/vendorRepository';
+import { MasterRepository } from '../repositories/masterRepository';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -26,7 +31,9 @@ export const uploadReportsMulter = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB per file
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf')) {
+    const isPdfExt = file.originalname.toLowerCase().endsWith('.pdf');
+    const isPdfMime = file.mimetype === 'application/pdf' || file.mimetype === 'application/x-pdf';
+    if (isPdfExt && (isPdfMime || !file.mimetype)) {
       cb(null, true);
     } else {
       cb(new Error('Only PDF files are supported'));
@@ -34,42 +41,30 @@ export const uploadReportsMulter = multer({
   }
 });
 
+export function hasPdfMagicBytes(filePath: string): boolean {
+  try {
+    const buffer = Buffer.alloc(4);
+    const fd = fs.openSync(filePath, 'r');
+    fs.readSync(fd, buffer, 0, 4, 0);
+    fs.closeSync(fd);
+    return buffer.toString('utf-8') === '%PDF';
+  } catch {
+    return false;
+  }
+}
+
 export class ReportsController {
   static async list(req: Request, res: Response) {
     try {
       const { search, result } = req.query;
-      const where: any = {};
+      const effectiveVendorId = req.user?.role === 'CLINIC'
+        ? (req.user.vendorId || '__NO_VENDOR__')
+        : (req.query.vendorId as string);
 
-      if (result && result !== 'ALL') {
-        where.result = result as ReportResult;
-      }
-
-      if (req.user?.role === 'CLINIC') {
-        where.vendorId = req.user.vendorId || '__NO_VENDOR__';
-      } else if (req.query.vendorId && req.query.vendorId !== 'ALL') {
-        where.vendorId = req.query.vendorId as string;
-      }
-
-      if (search) {
-        const s = String(search).trim();
-        where.OR = [
-          { id: { contains: s, mode: 'insensitive' } },
-          { employee: { name: { contains: s, mode: 'insensitive' } } },
-          { employee: { employeeNo: { contains: s, mode: 'insensitive' } } },
-          { employee: { iqamaId: { contains: s, mode: 'insensitive' } } },
-          { test: { name: { contains: s, mode: 'insensitive' } } }
-        ];
-      }
-
-      const reports = await prisma.medicalReport.findMany({
-        where,
-        include: {
-          employee: true,
-          test: true,
-          vendor: true,
-          request: true
-        },
-        orderBy: { testDate: 'desc' }
+      const reports = await ReportRepository.list({
+        result: result as string,
+        vendorId: effectiveVendorId,
+        search: search as string
       });
 
       return res.json({ reports });
@@ -85,10 +80,7 @@ export class ReportsController {
         return res.status(400).json({ error: 'requestId and result required' });
       }
 
-      const request = await prisma.medicalRequest.findUnique({
-        where: { id: requestId },
-        include: { test: true, employee: true }
-      });
+      const request = await RequestRepository.findById(requestId);
 
       if (!request) return res.status(404).json({ error: 'Request not found' });
       if (!request.vendorId) return res.status(400).json({ error: 'Request must be assigned to a clinic vendor before result entry' });
@@ -107,26 +99,36 @@ export class ReportsController {
         validUntil.setMonth(validUntil.getMonth() + request.test.validityMonths);
       }
 
-      const repCount = await prisma.medicalReport.count();
+      const repCount = await ReportRepository.count();
+
+      let parsedLabData: any = null;
+      let parsedValidityTerm: string | null = null;
+      let cleanNotes = remarks || '';
+
+      if (typeof remarks === 'string' && remarks.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(remarks);
+          parsedLabData = parsed.labData || null;
+          parsedValidityTerm = parsed.validityTerm || null;
+          cleanNotes = parsed.notes || '';
+        } catch (_) {}
+      } else if (typeof remarks === 'object' && remarks !== null) {
+        parsedLabData = remarks.labData || null;
+        parsedValidityTerm = remarks.validityTerm || null;
+        cleanNotes = remarks.notes || '';
+      }
 
       const formattedRemarks = doctorName
-        ? `[Examining Physician: ${doctorName}] ${remarks || ''}`
-        : (remarks || '');
+        ? `[Examining Physician: ${doctorName}] ${cleanNotes}`
+        : cleanNotes;
 
       // Upsert Report (handles both initial generation and subsequent updates/re-certification)
-      const existingReport = await prisma.medicalReport.findUnique({ where: { requestId } });
+      const existingReport = await ReportRepository.findByRequestId(requestId);
       const repId = existingReport?.id || `REP-${String(repCount + 81).padStart(4, '0')}`;
 
-      const report = await prisma.medicalReport.upsert({
-        where: { requestId },
-        update: {
-          result: result as ReportResult,
-          testDate: tDate,
-          validUntil,
-          remarks: formattedRemarks,
-          fileUrl: fileUrl || ''
-        },
-        create: {
+      const report = await ReportRepository.upsert(
+        requestId,
+        {
           id: repId,
           requestId,
           employeeId: request.employeeId,
@@ -136,16 +138,23 @@ export class ReportsController {
           testDate: tDate,
           validUntil,
           remarks: formattedRemarks,
+          labData: parsedLabData,
+          validityTerm: parsedValidityTerm,
           fileUrl: fileUrl || ''
         },
-        include: { employee: true, test: true, vendor: true }
-      });
+        {
+          result: result as ReportResult,
+          testDate: tDate,
+          validUntil,
+          remarks: formattedRemarks,
+          labData: parsedLabData,
+          validityTerm: parsedValidityTerm,
+          fileUrl: fileUrl || ''
+        }
+      );
 
       // Update Request status to COMPLETED
-      await prisma.medicalRequest.update({
-        where: { id: requestId },
-        data: { status: RequestStatus.COMPLETED }
-      });
+      await RequestRepository.update(requestId, { status: RequestStatus.COMPLETED });
 
       await AuditService.log({
         userId: req.user?.id,
@@ -166,17 +175,7 @@ export class ReportsController {
   static async getCertificate(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const report = await prisma.medicalReport.findFirst({
-        where: {
-          OR: [{ id }, { requestId: id }]
-        },
-        include: {
-          employee: true,
-          test: true,
-          vendor: true,
-          request: true
-        }
-      });
+      const report = await ReportRepository.findByIdOrRequestId(id);
 
       if (!report) return res.status(404).json({ error: 'Medical report not found' });
 
@@ -226,6 +225,35 @@ export class ReportsController {
     }
   }
 
+  static async downloadReportFile(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const report = await ReportRepository.findByIdOrRequestId(id);
+
+      if (!report || !report.fileUrl) {
+        return res.status(404).json({ error: 'Report file not found' });
+      }
+
+      // Clinic user can only download their own clinic's report
+      if (req.user?.role === 'CLINIC' && report.vendorId !== req.user.vendorId) {
+        return res.status(403).json({ error: 'Forbidden: Access to report restricted' });
+      }
+
+      // Strip leading slash or baseUrl to get filename
+      const filename = path.basename(report.fileUrl);
+      if (!StorageService.fileExists(filename)) {
+        return res.status(404).json({ error: 'Physical PDF file not found on disk' });
+      }
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+      const fileStream = StorageService.createReadStream(filename);
+      return fileStream.pipe(res);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
   static async bulkUploadPdf(req: Request, res: Response) {
     try {
       const files = (req.files as Express.Multer.File[]) || [];
@@ -244,28 +272,45 @@ export class ReportsController {
       // Verify or resolve MedicalTest
       let targetTestId = testId;
       if (!targetTestId) {
-        const firstTest = await prisma.medicalTest.findFirst({ where: { validityMonths: { gt: 0 } } });
+        const firstTest = await MasterRepository.findFirstTestWithValidity();
         targetTestId = firstTest?.id || '5004972';
       }
 
       // Verify vendor exists
-      const vendorRecord = await prisma.vendor.findUnique({ where: { id: clinicVendorId } });
+      const vendorRecord = await VendorRepository.findById(clinicVendorId);
       const clinicName = vendorRecord?.name || 'Accredited Medical Center';
 
       const matched: any[] = [];
       const unmatched: any[] = [];
 
       for (const file of files) {
+        // Enforce %PDF magic bytes check on physical file
+        if (!hasPdfMagicBytes(file.path)) {
+          try {
+            if (fs.existsSync(file.path)) {
+              fs.unlinkSync(file.path);
+            }
+          } catch (_) {}
+
+          if (files.length === 1) {
+            return res.status(400).json({ error: 'Uploaded file signature is corrupt or invalid: expected %PDF magic header.' });
+          }
+
+          unmatched.push({
+            fileName: file.originalname,
+            extractedIqama: '',
+            reason: 'File rejected: Header signature does not match valid %PDF structure.'
+          });
+          continue;
+        }
+
         let request: any = null;
         let employee: any = null;
         let iqamaCandidate = (req.body.iqamaId && files.length === 1) ? String(req.body.iqamaId).trim() : '';
 
         // Direct candidate match if single upload passes explicit requestId
         if (req.body.requestId && files.length === 1) {
-          request = await prisma.medicalRequest.findUnique({
-            where: { id: String(req.body.requestId) },
-            include: { employee: true, test: true }
-          });
+          request = await RequestRepository.findById(String(req.body.requestId));
           if (request) {
             employee = request.employee;
             if (!iqamaCandidate) iqamaCandidate = employee.iqamaId || employee.employeeNo;
@@ -281,16 +326,8 @@ export class ReportsController {
             iqamaCandidate = tenDigitMatch ? tenDigitMatch[0] : baseName.trim();
           }
 
-          // Search for matching employee by iqamaId or employeeNo
-          employee = await prisma.employee.findFirst({
-            where: {
-              OR: [
-                { iqamaId: iqamaCandidate },
-                { employeeNo: iqamaCandidate },
-                { id: iqamaCandidate }
-              ]
-            }
-          });
+          // Search for matching employee by iqamaId or employeeNo via Data Tier
+          employee = await EmployeeRepository.findByIdOrBadge(iqamaCandidate);
 
           if (!employee) {
             unmatched.push({
@@ -304,53 +341,33 @@ export class ReportsController {
 
         // Find or create a MedicalRequest for this employee if not already identified
         if (!request) {
-          request = await prisma.medicalRequest.findFirst({
-            where: {
-              employeeId: employee.id,
-              status: { in: [RequestStatus.WAITING, RequestStatus.SUBMITTED, RequestStatus.SCHEDULED] }
-            },
-            orderBy: { createdAt: 'desc' }
-          });
+          request = await RequestRepository.findLatestActiveForEmployee(employee.id);
 
           if (!request) {
             // Fallback: check if there is an existing request for this employee
-            request = await prisma.medicalRequest.findFirst({
-              where: { employeeId: employee.id },
-              orderBy: { createdAt: 'desc' }
-            });
+            request = await RequestRepository.findLatestForEmployee(employee.id);
           }
 
           if (!request) {
-            const reqCount = await prisma.medicalRequest.count();
-            request = await prisma.medicalRequest.create({
-              data: {
-                id: `MR-2026-${String(reqCount + 100).padStart(4, '0')}`,
-                employeeId: employee.id,
-                testId: targetTestId,
-                vendorId: clinicVendorId,
-                status: RequestStatus.COMPLETED
-              }
+            const reqCount = await RequestRepository.count();
+            request = await RequestRepository.create({
+              id: `MR-2026-${String(reqCount + 100).padStart(4, '0')}`,
+              employeeId: employee.id,
+              testId: targetTestId,
+              vendorId: clinicVendorId,
+              status: RequestStatus.COMPLETED
             });
           }
         }
 
-        const repCount = await prisma.medicalReport.count();
+        const repCount = await ReportRepository.count();
         const repId = `REP-${String(repCount + 100).padStart(4, '0')}`;
         const relativeUrl = `/uploads/reports/${file.filename}`;
 
-        // Upsert MedicalReport
-        const report = await prisma.medicalReport.upsert({
-          where: { requestId: request.id },
-          update: {
-            vendorId: clinicVendorId,
-            testId: targetTestId,
-            testDate: issueDate,
-            validUntil,
-            fileUrl: relativeUrl,
-            result: ReportResult.FIT,
-            remarks: `Official PDF Certificate Uploaded [Iqama: ${employee.iqamaId || iqamaCandidate}]`
-          },
-          create: {
+        // Upsert MedicalReport via Data Tier
+        const report = await ReportRepository.upsert(
+          request.id,
+          {
             id: repId,
             requestId: request.id,
             employeeId: employee.id,
@@ -362,14 +379,19 @@ export class ReportsController {
             result: ReportResult.FIT,
             remarks: `Official PDF Certificate Uploaded [Iqama: ${employee.iqamaId || iqamaCandidate}]`
           },
-          include: { employee: true, test: true, vendor: true }
-        });
+          {
+            vendorId: clinicVendorId,
+            testId: targetTestId,
+            testDate: issueDate,
+            validUntil,
+            fileUrl: relativeUrl,
+            result: ReportResult.FIT,
+            remarks: `Official PDF Certificate Uploaded [Iqama: ${employee.iqamaId || iqamaCandidate}]`
+          }
+        );
 
         // Mark request as completed
-        await prisma.medicalRequest.update({
-          where: { id: request.id },
-          data: { status: RequestStatus.COMPLETED }
-        });
+        await RequestRepository.update(request.id, { status: RequestStatus.COMPLETED });
 
         matched.push({
           reportId: report.id,
@@ -417,32 +439,7 @@ export class ReportsController {
       const statusFilter = req.query.status as string;
       const batchFilter = req.query.batchId as string;
 
-      const employees = await prisma.employee.findMany({
-        where: {
-          OR: [
-            { employeeNo: { startsWith: 'E102' } },
-            { employeeNo: { startsWith: 'E103' } }
-          ]
-        },
-        include: {
-          reports: {
-            include: {
-              test: true,
-              vendor: true
-            },
-            orderBy: { testDate: 'desc' }
-          },
-          requests: {
-            include: {
-              test: true,
-              vendor: true,
-              report: true
-            },
-            orderBy: { createdAt: 'desc' }
-          }
-        },
-        orderBy: { employeeNo: 'asc' }
-      });
+      const employees = await EmployeeRepository.listWorkforceClearanceRoster();
 
       const now = new Date('2026-11-06T00:00:00.000Z');
 
@@ -497,17 +494,18 @@ export class ReportsController {
               meta = typeof req.note === 'string' ? JSON.parse(req.note) : req.note;
             } catch (_) {}
           }
-          let b = meta.batchId;
+          let b = meta.batchId || meta.slotRequestId;
           if (!b) {
             if (req.id.startsWith('REQ-2026-0104')) b = 'REQ-2026-0104';
             else if (req.id.startsWith('REQ-2026-0101')) b = 'REQ-2026-0101';
             else if (req.id.startsWith('REQ-2026-0102')) b = 'REQ-2026-0102';
             else if (req.id.startsWith('REQ-2026-0103')) b = 'REQ-2026-0103';
+            else if (req.id.startsWith('SR-')) b = req.id.split('-').slice(0, 2).join('-');
             else if (req.id.startsWith('BULK-')) b = req.id.split('-').slice(0, 3).join('-');
           }
           if (b && b !== 'BATCH-2026-CLEARANCE-ROSTER') {
             employeeBatchId = b;
-            employeeBatchName = meta.batchName || (
+            employeeBatchName = meta.slotTitle || meta.batchName || (
               b === 'REQ-2026-0104' ? 'Yanpet medical test' :
               b === 'REQ-2026-0101' ? 'Sadara medical test' :
               b === 'REQ-2026-0102' ? 'SABIC medical screening with TSH' :
@@ -518,13 +516,15 @@ export class ReportsController {
               b === 'REQ-2026-0104' ? 'Yanpet Plant' :
               b === 'REQ-2026-0101' ? 'Complex South' :
               b === 'REQ-2026-0102' ? 'Jubail Site' :
-              b === 'REQ-2026-0103' ? 'Logistics Wing' : 'Main Industrial Complex'
+              b === 'REQ-2026-0103' ? 'Logistics Wing' :
+              (b.startsWith('SR-') ? 'Sadara Complex (Jubail)' : 'Main Industrial Complex')
             );
             employeeProtocol = meta.protocolType || (
               b === 'REQ-2026-0104' ? 'Periodic Clearance' :
               b === 'REQ-2026-0101' ? 'Annual Comprehensive' :
               b === 'REQ-2026-0102' ? 'Endocrine & Fitness Panel' :
-              b === 'REQ-2026-0103' ? 'Contractor Onboarding' : 'Roster Clearance'
+              b === 'REQ-2026-0103' ? 'Contractor Onboarding' :
+              (b.startsWith('SR-') ? 'Pre-Booked Quota Clearance' : 'Roster Clearance')
             );
             if (req.vendor?.name) {
               employeeAssignedClinic = req.vendor.name;
@@ -580,7 +580,7 @@ export class ReportsController {
           };
         });
 
-        // Fallback: If no reports yet, synthesize card from employee's primary request
+        // If no certified reports exist yet, indicate real pending status without synthetic dates
         if (cards.length === 0 && emp.requests.length > 0) {
           const primaryReq = emp.requests[0];
           const shortName = shortNameMap[primaryReq.testId] || (primaryReq.test?.name ? primaryReq.test.name.split(' ')[0] : 'Fitness');
@@ -590,11 +590,11 @@ export class ReportsController {
             name: primaryReq.test?.name || 'Occupational Medical Examination',
             shortName,
             validity: `${primaryReq.test?.validityMonths || 12} months`,
-            issued: primaryReq.apptDate ? formatDisplayDate(primaryReq.apptDate) : 'Dispatched',
-            validUntil: 'Pending Clinic Submission',
-            daysLeft: 30,
+            issued: primaryReq.apptDate ? formatDisplayDate(primaryReq.apptDate) : 'Not Examined',
+            validUntil: 'Pending Clinic Examination',
+            daysLeft: 0,
             status: 'EXPIRING_SOON',
-            clinicName: primaryReq.vendor?.name || employeeAssignedClinic || 'Accredited Medical Center',
+            clinicName: primaryReq.vendor?.name || employeeAssignedClinic || 'Pending Assignment',
             fileUrl: primaryReq.report?.fileUrl || '',
             result: primaryReq.report?.result || 'PENDING'
           });
@@ -625,11 +625,8 @@ export class ReportsController {
         };
       });
 
-      // Filter to the 70 employees from E10200 to E10269 for the baseline Master Roster
-      const candidateMasterRows = allRows.filter(r => {
-        const num = parseInt(r.id.replace(/\D/g, ''), 10);
-        return num >= 10200 && num <= 10269;
-      });
+      // Use all active clearance roster rows directly
+      const candidateMasterRows = allRows;
 
       // Assemble list of all Batches
       const batchDefs = [

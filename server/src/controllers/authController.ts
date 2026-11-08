@@ -1,11 +1,10 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import prisma from '../prisma';
 import { Role } from '@prisma/client';
 import { AuditService } from '../services/auditService';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'ecc-health-clearance-secret-2026';
+import { config } from '../config';
+import { UserRepository } from '../repositories/userRepository';
 
 export class AuthController {
   static async login(req: Request, res: Response) {
@@ -15,10 +14,7 @@ export class AuthController {
         return res.status(400).json({ error: 'Username and password required' });
       }
 
-      const user = await prisma.user.findUnique({
-        where: { username: username.toLowerCase() },
-        include: { vendor: true }
-      });
+      const user = await UserRepository.findByUsername(username);
 
       if (!user || !user.isActive) {
         return res.status(401).json({ error: 'Invalid credentials or inactive account' });
@@ -37,7 +33,7 @@ export class AuthController {
         vendorId: user.vendorId
       };
 
-      const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+      const token = jwt.sign(payload, config.jwtSecret, { expiresIn: '7d' });
 
       await AuditService.log({
         userId: user.id,
@@ -67,10 +63,7 @@ export class AuthController {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
-      const user = await prisma.user.findUnique({
-        where: { id: req.user.id },
-        include: { vendor: true }
-      });
+      const user = await UserRepository.findById(req.user.id);
 
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
@@ -102,10 +95,7 @@ export class AuthController {
       const { targetRole, vendorId } = req.body;
 
       if (targetRole === 'ADMIN') {
-        const adminUser = await prisma.user.findUnique({
-          where: { id: adminId },
-          include: { vendor: true }
-        });
+        const adminUser = await UserRepository.findById(adminId);
 
         if (!adminUser) {
           return res.status(404).json({ error: 'Admin account not found' });
@@ -118,7 +108,7 @@ export class AuthController {
           role: adminUser.role,
           vendorId: adminUser.vendorId
         };
-        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+        const token = jwt.sign(payload, config.jwtSecret, { expiresIn: '7d' });
 
         return res.json({
           token,
@@ -128,25 +118,10 @@ export class AuthController {
           }
         });
       }
-      
-      let userQuery: any = { role: targetRole as Role, isActive: true };
-      if (vendorId) {
-        userQuery.vendorId = vendorId;
-      }
 
-      let user = await prisma.user.findFirst({
-        where: userQuery,
-        include: { vendor: true }
-      });
+      const user = await UserRepository.findFirstByRole(targetRole as Role, vendorId);
 
-      if (!user) {
-        user = await prisma.user.findFirst({
-          where: { role: targetRole as Role },
-          include: { vendor: true }
-        });
-      }
-
-      if (!user) {
+      if (!user || !user.isActive) {
         return res.status(404).json({ error: `No active user found for role ${targetRole}` });
       }
 
@@ -159,7 +134,18 @@ export class AuthController {
         impersonatorId: adminId
       };
 
-      const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+      // Impersonation token has a safe 2-hour TTL
+      const token = jwt.sign(payload, config.jwtSecret, { expiresIn: '2h' });
+
+      await AuditService.log({
+        userId: adminId,
+        actorName: (req.user as any)?.name || 'Admin',
+        role: req.user?.role || Role.ADMIN,
+        action: 'ROLE_IMPERSONATE',
+        entityType: 'User',
+        entityId: user.id,
+        details: `Administrator switched role to ${targetRole} (impersonating ${user.username})`
+      });
 
       return res.json({
         token,

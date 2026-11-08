@@ -1,18 +1,25 @@
 import { Request, Response } from 'express';
-import prisma from '../prisma';
+import { EmployeeRepository } from '../repositories/employeeRepository';
+import { RequestRepository } from '../repositories/requestRepository';
+import { ReportRepository } from '../repositories/reportRepository';
+import { VendorRepository } from '../repositories/vendorRepository';
+import { InvoiceRepository } from '../repositories/invoiceRepository';
+import { UserRepository } from '../repositories/userRepository';
+import { AuditRepository } from '../repositories/auditRepository';
+import { MasterRepository } from '../repositories/masterRepository';
 
 export class DashboardController {
   static async getHealth(req: Request, res: Response) {
     try {
       const dbStart = Date.now();
       const [empCount, reqCount, repCount, venCount, invCount, usrCount, logCount] = await Promise.all([
-        prisma.employee.count(),
-        prisma.medicalRequest.count(),
-        prisma.medicalReport.count(),
-        prisma.vendor.count(),
-        prisma.invoice.count(),
-        prisma.user.count(),
-        prisma.auditLog.count()
+        EmployeeRepository.countAll(),
+        RequestRepository.count(),
+        ReportRepository.count(),
+        VendorRepository.count(),
+        InvoiceRepository.count(),
+        UserRepository.count(),
+        AuditRepository.count()
       ]);
       const dbLatencyMs = Date.now() - dbStart;
 
@@ -48,40 +55,40 @@ export class DashboardController {
 
   static async getMetrics(req: Request, res: Response) {
     try {
-      // 1. Core Medical Clearance Counts from PostgreSQL
-      const totalEmployees = await prisma.employee.count({ where: { status: 'Active' } });
-      const totalRequests = await prisma.medicalRequest.count();
-      const waitingRequests = await prisma.medicalRequest.count({ where: { status: 'WAITING' } });
-      const scheduledRequests = await prisma.medicalRequest.count({ where: { status: 'SCHEDULED' } });
-      const completedRequests = await prisma.medicalRequest.count({ where: { status: 'COMPLETED' } });
-      
-      const fitReports = await prisma.medicalReport.count({ where: { result: 'FIT' } });
-      const pendingInvoices = await prisma.invoice.count({ where: { status: 'SUBMITTED' } });
-      
+      // 1. Core Medical Clearance Counts via Data Tier Repositories
+      const totalEmployees = await EmployeeRepository.countActive();
+      const totalRequests = await RequestRepository.count();
+      const waitingRequests = await RequestRepository.count({ status: 'WAITING' });
+      const scheduledRequests = await RequestRepository.count({ status: 'SCHEDULED' });
+      const completedRequests = await RequestRepository.count({ status: 'COMPLETED' });
+
+      const fitReports = await ReportRepository.count({ result: 'FIT' });
+      const pendingInvoices = await InvoiceRepository.count({ status: 'SUBMITTED' });
+      const pendingInvoiceSum = await InvoiceRepository.aggregateSum({ status: 'SUBMITTED' });
+      const pendingTotalSAR = pendingInvoiceSum._sum.totalAmount != null
+        ? `SAR ${Number(pendingInvoiceSum._sum.totalAmount).toFixed(2)}`
+        : 'SAR 0.00';
+
       const now = new Date();
       const in30Days = new Date();
       in30Days.setDate(in30Days.getDate() + 30);
-      
-      const expiringSoon = await prisma.medicalReport.count({
-        where: {
-          validUntil: {
-            gte: now,
-            lte: in30Days
-          }
+
+      const expiringSoon = await ReportRepository.count({
+        validUntil: {
+          gte: now,
+          lte: in30Days
         }
       });
 
-      // 2. Clearance Volume by Industrial Client / Facility (Aggregated from real database records)
-      const requestsWithClient = await prisma.medicalRequest.findMany({
-        select: { department: true, test: { select: { name: true } }, note: true }
-      });
+      // 2. Clearance Volume by Industrial Client / Facility (Aggregated purely from real database records)
+      const requestsWithClient = await RequestRepository.findRequestsWithClientFields();
 
       const siteBuckets: Record<string, { client: string; count: number; target: number }> = {
-        SADARA: { client: 'Sadara Complex (Jubail)', count: 0, target: 400 },
-        SABIC: { client: 'SABIC Affiliates & Yanpet', count: 0, target: 350 },
-        ARAMCO: { client: 'Saudi Aramco Sites', count: 0, target: 300 },
-        PETROKEMYA: { client: 'PetroKemya Plants', count: 0, target: 200 },
-        RC: { client: 'Royal Commission Projects', count: 0, target: 150 }
+        SADARA: { client: 'Sadara Complex (Jubail)', count: 0, target: 100 },
+        SABIC: { client: 'SABIC Affiliates & Yanpet', count: 0, target: 80 },
+        ARAMCO: { client: 'Saudi Aramco Sites', count: 0, target: 60 },
+        PETROKEMYA: { client: 'PetroKemya Plants', count: 0, target: 40 },
+        RC: { client: 'Royal Commission Projects', count: 0, target: 40 }
       };
 
       requestsWithClient.forEach(r => {
@@ -94,10 +101,8 @@ export class DashboardController {
       });
 
       const clientVolume = Object.entries(siteBuckets).map(([code, s]) => {
-        // Base volume scaled with live database request counts
-        const base = code === 'SADARA' ? 385 : code === 'SABIC' ? 320 : code === 'ARAMCO' ? 265 : code === 'PETROKEMYA' ? 180 : 124;
-        const total = base + s.count;
-        const percent = Math.min(100, Math.round((total / s.target) * 100));
+        const total = s.count;
+        const percent = s.target > 0 ? Math.min(100, Math.round((total / s.target) * 100)) : 0;
         return {
           client: s.client,
           code,
@@ -107,51 +112,65 @@ export class DashboardController {
         };
       });
 
-      // 3. Department Medical Compliance Status (Dynamically aggregated from Employee DB)
-      const deptGroups = await prisma.employee.groupBy({
-        by: ['department'],
-        _count: { id: true },
-        where: { department: { not: null } }
+      // 3. Medical Protocol & Test Package Demand (Dynamically aggregated from Requests & Test Master)
+      const testCounts = await RequestRepository.groupByTestId();
+      const allTests = await MasterRepository.listAllTests();
+      const totalTestRequests = testCounts.reduce((acc, c) => acc + c._count.id, 0) || 1;
+
+      const protocolPackages = testCounts.map(tc => {
+        const testObj = allTests.find(t => t.id === tc.testId);
+        const name = testObj?.name || `Package #${tc.testId}`;
+        const count = tc._count.id;
+        const percent = Math.round((count / totalTestRequests) * 100);
+        return {
+          id: tc.testId,
+          code: tc.testId,
+          name,
+          count,
+          percent,
+          validityMonths: testObj?.validityMonths || 12,
+          color: tc.testId === '5004959' ? 'bg-secondary' : tc.testId === '5004955' ? 'bg-emerald-500' : tc.testId === '5004972' ? 'bg-blue-600' : 'bg-primary'
+        };
       });
 
-      const departmentCompliance = deptGroups.map(g => {
-        const deptName = g.department || 'General Operations';
-        const total = g._count.id;
-        const cleared = Math.max(1, Math.round(total * 0.95));
-        const percent = Math.round((cleared / total) * 100);
+      // Department Medical Compliance: Aggregated from active employees and real valid reports in PostgreSQL
+      const { deptCounts, clearedReports } = await EmployeeRepository.getActiveDepartmentCountsAndCleared(now);
+
+      const deptMap: Record<string, { total: number; cleared: number }> = {};
+      deptCounts.forEach(dc => {
+        const d = dc.department || 'General Operations';
+        if (!deptMap[d]) deptMap[d] = { total: 0, cleared: 0 };
+        deptMap[d].total += dc._count.id;
+      });
+
+      const seenClearedEmpIds = new Set<string>();
+      clearedReports.forEach(rep => {
+        if (seenClearedEmpIds.has(rep.employeeId)) return;
+        seenClearedEmpIds.add(rep.employeeId);
+        const d = rep.employee?.department || 'General Operations';
+        if (!deptMap[d]) deptMap[d] = { total: 1, cleared: 0 };
+        deptMap[d].cleared++;
+      });
+
+      const departmentCompliance = Object.entries(deptMap).map(([name, stat]) => {
+        const percent = stat.total > 0 ? Math.round((stat.cleared / stat.total) * 100) : 0;
         return {
-          name: deptName,
-          total,
-          cleared,
+          name,
+          total: stat.total,
+          cleared: stat.cleared,
           percent,
-          status: percent >= 95 ? 'Optimal' : percent >= 90 ? 'Compliant' : 'Action Needed'
+          status: percent >= 90 ? 'Optimal' : percent >= 75 ? 'Compliant' : 'Action Needed'
         };
       });
 
       // 4. Accredited Clinic Quotas & Capacity (Queried directly from live database vendors & slots)
-      const clinics = await prisma.vendor.findMany({
-        where: { isActive: true },
-        select: {
-          id: true,
-          code: true,
-          name: true,
-          sapVendorNo: true,
-          crNumber: true,
-          slots: {
-            take: 1,
-            orderBy: { createdAt: 'desc' }
-          },
-          requests: {
-            where: { status: { in: ['SUBMITTED', 'SCHEDULED'] } }
-          }
-        }
-      });
+      const clinics = await VendorRepository.listWithSlotsAndRequests();
 
       const clinicWorkload = clinics.map(c => {
         const capacity = c.slots[0]?.totalCapacity ?? 50;
         const assigned = c.requests.length;
         const available = Math.max(0, capacity - assigned);
-        const utilization = Math.round((assigned / capacity) * 100);
+        const utilization = capacity > 0 ? Math.round((assigned / capacity) * 100) : 0;
 
         return {
           id: c.id,
@@ -170,31 +189,25 @@ export class DashboardController {
         kpis: {
           activeWorkforce: {
             value: totalEmployees,
-            trend: '+4.2% active personnel',
-            ceilingPercent: Math.min(100, Math.round((totalEmployees / 1500) * 100)),
-            targetText: 'Capacity: 1,500 active'
+            trend: `${totalEmployees} Registered active workforce`
           },
           fitCertificates: {
             value: `${fitReports} Active`,
-            trend: '100% verified QR authenticity',
-            ceilingPercent: 96,
-            targetText: 'Site Gate Pass Ready'
+            trend: `${fitReports} Valid clearance certificates`
           },
           inFlightRequests: {
             value: `${waitingRequests + scheduledRequests} In-Flight`,
             waiting: waitingRequests,
-            scheduled: scheduledRequests,
-            ceilingPercent: Math.round(((waitingRequests + scheduledRequests) / 30) * 100),
-            targetText: `${waitingRequests} waiting central triage`
+            scheduled: scheduledRequests
           },
           expiringRenewals: {
-            value: `${expiringSoon || 14} Expiring`,
-            warningText: `${expiringSoon || 14} certificates <30 days`,
-            auditBar: 'Target Parity: 98%'
+            value: `${expiringSoon} Expiring`,
+            warningText: `${expiringSoon} certificates <30 days`,
+            auditBar: 'Live Database Synced'
           },
           pendingInvoices: {
             value: `${pendingInvoices} Pending`,
-            subtotalSAR: 'SAR 174.80',
+            subtotalSAR: pendingTotalSAR,
             targetText: 'Awaiting SES Clearance'
           }
         },
@@ -206,6 +219,7 @@ export class DashboardController {
           pendingInvoices
         },
         clientVolume,
+        protocolPackages,
         departmentCompliance,
         clinicWorkload
       });

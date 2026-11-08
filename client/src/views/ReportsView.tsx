@@ -131,6 +131,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
   // Open PDF Viewer Modal for a specific card
   const handleViewCardReport = (emp: any, card: any) => {
     setSelectedPdfReport({
+      id: card.id,
       employeeName: emp.name,
       reportName: card.name,
       iqamaId: emp.iqamaId || emp.id,
@@ -151,8 +152,8 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
         employeeName: emp.name,
         reportName: 'Occupational Medical Clearance Assessment',
         iqamaId: emp.iqamaId || emp.id,
-        issueDate: '06 Nov 2026',
-        expiryDate: '06 Nov 2027',
+        issueDate: 'Not Examined',
+        expiryDate: 'Pending Clinic Examination',
         clinicName: emp.assignedClinic || 'Accredited Medical Center',
         fileUrl: ''
       });
@@ -239,7 +240,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 border-b border-slate-200/80 gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-[20px] text-teal-800">verified_user</span>
+            <span className="material-symbols-outlined text-[20px] text-secondary">verified_user</span>
             <span className="text-[11px] font-bold uppercase text-slate-500 tracking-wider">
               Workforce Compliance Governance
             </span>
@@ -264,7 +265,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <span className="material-symbols-outlined text-[15px] text-teal-800">table_chart</span>
+            <span className="material-symbols-outlined text-[15px] text-secondary">table_chart</span>
             <span>Medical Clearance</span>
           </button>
 
@@ -278,10 +279,10 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <span className="material-symbols-outlined text-[15px] text-teal-700">inventory_2</span>
+            <span className="material-symbols-outlined text-[15px] text-secondary">inventory_2</span>
             <span>Batch-Wise View</span>
             {batches.length > 0 && (
-              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-teal-100 text-teal-800">
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-secondary/15 text-secondary">
                 {batches.length}
               </span>
             )}
@@ -306,44 +307,44 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
       {/* VIEW 1: MASTER ROSTER (MATCHING USER SCREENSHOT) */}
       {activeTab === 'CLEARANCE_ROSTER' && (
         <>
-          {/* 4 TOP KPI SUMMARY CARDS (MATCHING SCREENSHOT) */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+          {/* 4 TOP KPI SUMMARY CARDS (COMPACT & SNUG WIDTH) */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-3xl">
             {/* Card 1: Total Employees */}
-            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="font-display font-extrabold text-3xl text-slate-900 tracking-tight leading-none">
+            <div className="bg-white rounded-xl border border-slate-200/90 px-3.5 py-2.5 shadow-2xs hover:shadow-xs transition-shadow">
+              <div className="font-display font-extrabold text-2xl text-slate-900 tracking-tight leading-none">
                 {kpis.totalEmployees}
               </div>
-              <div className="text-xs font-semibold text-slate-500 mt-2">
+              <div className="text-[11px] font-semibold text-slate-500 mt-1">
                 Employees
               </div>
             </div>
 
             {/* Card 2: All cards valid */}
-            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="font-display font-extrabold text-3xl text-emerald-600 tracking-tight leading-none">
+            <div className="bg-white rounded-xl border border-slate-200/90 px-3.5 py-2.5 shadow-2xs hover:shadow-xs transition-shadow">
+              <div className="font-display font-extrabold text-2xl text-emerald-600 tracking-tight leading-none">
                 {kpis.allCardsValid}
               </div>
-              <div className="text-xs font-semibold text-slate-500 mt-2">
+              <div className="text-[11px] font-semibold text-slate-500 mt-1">
                 All cards valid
               </div>
             </div>
 
             {/* Card 3: Expiring <=60 days */}
-            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="font-display font-extrabold text-3xl text-amber-500 tracking-tight leading-none">
+            <div className="bg-white rounded-xl border border-slate-200/90 px-3.5 py-2.5 shadow-2xs hover:shadow-xs transition-shadow">
+              <div className="font-display font-extrabold text-2xl text-amber-500 tracking-tight leading-none">
                 {kpis.expiringWithin60}
               </div>
-              <div className="text-xs font-semibold text-slate-500 mt-2">
+              <div className="text-[11px] font-semibold text-slate-500 mt-1">
                 Expiring &le;60 days
               </div>
             </div>
 
             {/* Card 4: Has expired card */}
-            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="font-display font-extrabold text-3xl text-rose-500 tracking-tight leading-none">
+            <div className="bg-white rounded-xl border border-slate-200/90 px-3.5 py-2.5 shadow-2xs hover:shadow-xs transition-shadow">
+              <div className="font-display font-extrabold text-2xl text-rose-500 tracking-tight leading-none">
                 {kpis.hasExpiredCard}
               </div>
-              <div className="text-xs font-semibold text-slate-500 mt-2">
+              <div className="text-[11px] font-semibold text-slate-500 mt-1">
                 Has expired card
               </div>
             </div>
@@ -359,7 +360,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search name..."
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-teal-700 shadow-2xs"
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-secondary shadow-2xs"
                 />
               </div>
 
@@ -371,7 +372,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
                   setSelectedBatch(bId);
                   loadClearanceData(bId);
                 }}
-                className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-teal-700 cursor-pointer shadow-2xs"
+                className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-secondary cursor-pointer shadow-2xs"
               >
                 <option value="ALL">All batches &#8597;</option>
                 {batches.map((b) => (
@@ -385,7 +386,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
               <select
                 value={selectedDept}
                 onChange={(e) => setSelectedDept(e.target.value)}
-                className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-teal-700 cursor-pointer shadow-2xs"
+                className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-secondary cursor-pointer shadow-2xs"
               >
                 <option value="ALL">All departments &#8597;</option>
                 {departments.map((d) => (
@@ -399,7 +400,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
               <select
                 value={selectedStatus}
                 onChange={(e) => setSelectedStatus(e.target.value)}
-                className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-teal-700 cursor-pointer shadow-2xs"
+                className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-secondary cursor-pointer shadow-2xs"
               >
                 <option value="ALL">All statuses &#8597;</option>
                 <option value="VALID">Valid</option>
@@ -411,7 +412,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
               <button
                 type="button"
                 onClick={() => setActiveTab('BATCH_DISPATCH')}
-                className="px-2.5 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 font-bold text-xs border border-teal-200 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                className="px-2.5 py-1.5 rounded-xl bg-orange-50 hover:bg-orange-100 text-secondary font-bold text-xs border border-orange-200 transition-colors inline-flex items-center gap-1 cursor-pointer"
                 title="Switch to Grouped Batch-Wise View"
               >
                 <span className="material-symbols-outlined text-[14px]">view_agenda</span>
@@ -480,7 +481,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
                                       className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200/80"
                                       title={`Dispatched in Batch: ${emp.batchId} (${emp.batchName})`}
                                     >
-                                      <span className="material-symbols-outlined text-[11px] text-teal-700">inventory_2</span>
+                                      <span className="material-symbols-outlined text-[11px] text-secondary">inventory_2</span>
                                       <span>{emp.batchId}</span>
                                     </span>
                                     <span className="text-[10px] text-slate-400 font-medium truncate max-w-[130px]">
@@ -567,9 +568,9 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
                                 {emp.batchId && (
                                   <div className="mb-3 px-3.5 py-2.5 rounded-xl bg-slate-100/80 border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
                                     <div className="flex items-center gap-2">
-                                      <span className="material-symbols-outlined text-[18px] text-teal-800">local_shipping</span>
+                                      <span className="material-symbols-outlined text-[18px] text-secondary">local_shipping</span>
                                       <span className="text-slate-600">Dispatched under Batch:</span>
-                                      <span className="font-mono font-bold text-teal-900 bg-teal-100 px-2 py-0.5 rounded border border-teal-200">
+                                      <span className="font-mono font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                                         {emp.batchId}
                                       </span>
                                       <span className="font-bold text-slate-800">{emp.batchName}</span>
@@ -649,7 +650,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
                                               <button
                                                 type="button"
                                                 onClick={() => handleViewCardReport(emp, card)}
-                                                className="px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-800 font-bold text-[10.5px] inline-flex items-center gap-1 border border-teal-200 cursor-pointer shadow-2xs transition-colors"
+                                                className="px-2.5 py-1 rounded-lg bg-orange-50 hover:bg-orange-100 text-secondary font-bold text-[10.5px] inline-flex items-center gap-1 border border-orange-200 cursor-pointer shadow-2xs transition-colors"
                                               >
                                                 <span className="material-symbols-outlined text-[13px]">picture_as_pdf</span>
                                                 <span>View Report</span>
@@ -678,56 +679,44 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
       {/* VIEW 2: BATCH-WISE CLEARANCE DISPATCH (GROUPED BATCH VIEW FOR HR) */}
       {activeTab === 'BATCH_DISPATCH' && (
         <>
-          {/* TOP 4 BATCH SUMMARY METRIC CARDS */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+          {/* TOP 4 BATCH SUMMARY METRIC CARDS (COMPACT & SNUG WIDTH) */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-3xl">
             {/* Card 1: Active Clearance Batches */}
-            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="flex items-center justify-between">
-                <div className="font-display font-extrabold text-3xl text-slate-900 tracking-tight leading-none">
-                  {batchAggregateKpis.totalBatches}
-                </div>
-                <span className="material-symbols-outlined text-teal-700 text-[24px]">inventory_2</span>
+            <div className="bg-white rounded-xl border border-slate-200/90 px-3.5 py-2.5 shadow-2xs hover:shadow-xs transition-shadow">
+              <div className="font-display font-extrabold text-2xl text-slate-900 tracking-tight leading-none">
+                {batchAggregateKpis.totalBatches}
               </div>
-              <div className="text-xs font-semibold text-slate-500 mt-2">
+              <div className="text-[11px] font-semibold text-slate-500 mt-1">
                 Active Clearance Batches
               </div>
             </div>
 
             {/* Card 2: Total Dispatched Workforce */}
-            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="flex items-center justify-between">
-                <div className="font-display font-extrabold text-3xl text-slate-900 tracking-tight leading-none">
-                  {batchAggregateKpis.totalEmployees}
-                </div>
-                <span className="material-symbols-outlined text-slate-500 text-[24px]">groups</span>
+            <div className="bg-white rounded-xl border border-slate-200/90 px-3.5 py-2.5 shadow-2xs hover:shadow-xs transition-shadow">
+              <div className="font-display font-extrabold text-2xl text-slate-900 tracking-tight leading-none">
+                {batchAggregateKpis.totalEmployees}
               </div>
-              <div className="text-xs font-semibold text-slate-500 mt-2">
+              <div className="text-[11px] font-semibold text-slate-500 mt-1">
                 Total Batch Workforce
               </div>
             </div>
 
             {/* Card 3: Cleared & Fit */}
-            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="flex items-center justify-between">
-                <div className="font-display font-extrabold text-3xl text-emerald-600 tracking-tight leading-none">
-                  {batchAggregateKpis.totalDone}
-                </div>
-                <span className="material-symbols-outlined text-emerald-600 text-[24px]">verified</span>
+            <div className="bg-white rounded-xl border border-slate-200/90 px-3.5 py-2.5 shadow-2xs hover:shadow-xs transition-shadow">
+              <div className="font-display font-extrabold text-2xl text-emerald-600 tracking-tight leading-none">
+                {batchAggregateKpis.totalDone}
               </div>
-              <div className="text-xs font-semibold text-slate-500 mt-2">
+              <div className="text-[11px] font-semibold text-slate-500 mt-1">
                 Done & Medically Fit
               </div>
             </div>
 
             {/* Card 4: Pending Clinic Results */}
-            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="flex items-center justify-between">
-                <div className="font-display font-extrabold text-3xl text-amber-500 tracking-tight leading-none">
-                  {batchAggregateKpis.totalPending}
-                </div>
-                <span className="material-symbols-outlined text-amber-500 text-[24px]">hourglass_top</span>
+            <div className="bg-white rounded-xl border border-slate-200/90 px-3.5 py-2.5 shadow-2xs hover:shadow-xs transition-shadow">
+              <div className="font-display font-extrabold text-2xl text-amber-500 tracking-tight leading-none">
+                {batchAggregateKpis.totalPending}
               </div>
-              <div className="text-xs font-semibold text-slate-500 mt-2">
+              <div className="text-[11px] font-semibold text-slate-500 mt-1">
                 Pending Clinic Results
               </div>
             </div>
@@ -742,7 +731,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
                   value={batchSearchQuery}
                   onChange={(e) => setBatchSearchQuery(e.target.value)}
                   placeholder="Search batch title, plant, or employee..."
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-teal-700 shadow-2xs"
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-secondary shadow-2xs"
                 />
               </div>
 
@@ -750,7 +739,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
               <select
                 value={selectedPlantFilter}
                 onChange={(e) => setSelectedPlantFilter(e.target.value)}
-                className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-teal-700 cursor-pointer shadow-2xs"
+                className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-secondary cursor-pointer shadow-2xs"
               >
                 <option value="ALL">All Industrial Facilities &#8597;</option>
                 {availablePlants.map((plant) => (
@@ -819,19 +808,13 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
                       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
                         <div className="space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-mono text-xs font-extrabold text-teal-800 bg-teal-50 px-2.5 py-0.5 rounded border border-teal-200">
+                            <span className="font-mono text-xs font-extrabold text-slate-800 bg-slate-100 px-2.5 py-0.5 rounded border border-slate-200">
                               {batch.id}
                             </span>
                             <span className="text-slate-300">&bull;</span>
                             <h2 className="font-display font-extrabold text-base text-slate-900">
                               {batch.name}
                             </h2>
-                            <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                              {batch.plant}
-                            </span>
-                            <span className="text-[10.5px] font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
-                              {batch.protocolType}
-                            </span>
                           </div>
 
                           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 pt-0.5">
@@ -840,7 +823,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
                             </span>
                             <span>&bull;</span>
                             <span>
-                              Assigned Clinic: <strong className="text-teal-800">{batch.assignedClinic}</strong>
+                              Assigned Clinic: <strong className="text-primary font-bold">{batch.assignedClinic}</strong>
                             </span>
                             <span>&bull;</span>
                             <span>
@@ -869,7 +852,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
                             </span>
                             <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
                               <div
-                                className="h-full bg-teal-600 rounded-full transition-all duration-300"
+                                className="h-full bg-secondary rounded-full transition-all duration-300"
                                 style={{ width: `${batch.completionRate}%` }}
                               />
                             </div>
@@ -1055,7 +1038,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
               <select
                 value={archiveFilter}
                 onChange={(e) => setArchiveFilter(e.target.value)}
-                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-teal-700 cursor-pointer"
+                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-secondary cursor-pointer"
               >
                 <option value="ALL">All Evaluation Results &#8597;</option>
                 <option value="FIT">Fit for Employment</option>
@@ -1090,7 +1073,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {archiveReports.map((report) => (
                     <tr key={report.id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="py-3 px-4 font-mono font-bold text-teal-800">
+                      <td className="py-3 px-4 font-mono font-bold text-primary">
                         {report.id}
                       </td>
                       <td className="py-3 px-4">
@@ -1123,10 +1106,11 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
                             type="button"
                             onClick={() => {
                               setSelectedPdfReport({
+                                id: report.id,
                                 employeeName: report.employee?.name,
                                 reportName: report.test?.name,
                                 iqamaId: report.employee?.iqamaId || report.employee?.employeeNo,
-                                issueDate: report.testDate ? new Date(report.testDate).toLocaleDateString('en-GB') : '06 Nov 2026',
+                                issueDate: report.testDate ? new Date(report.testDate).toLocaleDateString('en-GB') : '—',
                                 expiryDate: report.validUntil ? new Date(report.validUntil).toLocaleDateString('en-GB') : null,
                                 clinicName: report.vendor?.name || 'Accredited Medical Center',
                                 fileUrl: report.fileUrl

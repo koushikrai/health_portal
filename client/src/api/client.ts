@@ -45,7 +45,12 @@ export const api = {
   getMetrics: () => apiClient.get('/dashboard/metrics'),
 
   // Employees
-  searchEmployees: (q: string) => apiClient.get(`/employees/search?q=${encodeURIComponent(q)}`),
+  searchEmployees: (q: string = '', limit?: number, offset?: number) => {
+    let url = `/employees/search?q=${encodeURIComponent(q)}`;
+    if (limit) url += `&limit=${limit}`;
+    if (offset) url += `&offset=${offset}`;
+    return apiClient.get(url);
+  },
   getEmployee: (id: string) => apiClient.get(`/employees/${id}`),
   checkEligibility: (id: string, testId: string) => apiClient.get(`/employees/${id}/eligibility?testId=${testId}`),
 
@@ -75,6 +80,7 @@ export const api = {
     apiClient.get('/clearance/workforce', { params }),
   submitReportResult: (data: any) => apiClient.post('/reports', data),
   getCertificate: (id: string) => apiClient.get(`/reports/${id}/certificate`),
+  getReportPdfBlob: (id: string) => apiClient.get(`/reports/${id}/file`, { responseType: 'blob' }),
   uploadBatchReports: (formData: FormData) => apiClient.post('/reports/bulk-upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
@@ -105,6 +111,26 @@ export const api = {
   getSlotsByClinic: () => apiClient.get('/slots/by-clinic'),
   getSlotsPriceComparison: () => apiClient.get('/slots/price-comparison'),
 
+  // Slot Assignments (Single & Bulk Employee Allocation for HR)
+  getSlotAssignments: (slotId: string) => apiClient.get(`/slots/${slotId}/assignments`),
+  assignSingleToSlot: (slotId: string, data: {
+    employeeNo?: string;
+    employeeId?: string;
+    name?: string;
+    department?: string;
+    vendorId?: string;
+    apptDate?: string;
+    note?: string;
+  }) => apiClient.post(`/slots/${slotId}/assign-single`, data),
+  assignBulkToSlot: (slotId: string, data: {
+    employees: Array<{ employeeNo?: string; id?: string; name?: string; department?: string }>;
+    vendorId?: string;
+    apptDate?: string;
+    note?: string;
+  }) => apiClient.post(`/slots/${slotId}/assign-bulk`, data),
+  unassignFromSlot: (slotId: string, requestId: string) =>
+    apiClient.delete(`/slots/${slotId}/assignments/${requestId}`),
+
   // Master Administration & Governance
   admin: {
     getOverview: () => apiClient.get('/admin/overview'),
@@ -114,6 +140,7 @@ export const api = {
     deleteUser: (id: string) => apiClient.delete(`/admin/users/${id}`),
     createClinic: (data: any) => apiClient.post('/admin/clinics', data),
     updateClinic: (id: string, data: any) => apiClient.patch(`/admin/clinics/${id}`, data),
+    deleteClinic: (id: string) => apiClient.delete(`/admin/clinics/${id}`),
     createContract: (data: any) => apiClient.post('/admin/contracts', data),
     addContractRate: (data: any) => apiClient.post('/admin/rates', data),
     deleteContractRate: (id: string) => apiClient.delete(`/admin/rates/${id}`),

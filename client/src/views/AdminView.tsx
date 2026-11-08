@@ -291,8 +291,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ userRole }) => {
   const handleOpenAddContract = (vendorId: string) => {
     setContractVendorId(vendorId);
     setContractForm({
-      contractNo: `462000${Math.floor(1000 + Math.random() * 9000)}`,
-      quoteNo: `QT26/0${Math.floor(1 + Math.random() * 9)}/${Math.floor(100 + Math.random() * 900)}`,
+      contractNo: '',
+      quoteNo: '',
       invoicingType: 'Ariba portal',
       paymentTerms: 30,
       startDate: new Date().toISOString().slice(0, 10),
@@ -490,7 +490,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ userRole }) => {
           }`}
         >
           <span className="material-symbols-outlined text-[18px]">timer</span>
-          <span>Slot Governance & Expiry (${slotExpiryDays}d)</span>
+          <span>Slot Governance & Expiry ({slotExpiryDays}d)</span>
         </button>
       </div>
 
@@ -653,7 +653,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ userRole }) => {
       {activeTab === 'settings' && (
         <div className="space-y-5">
           {/* Module Banner */}
-          <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-teal-950 p-6 rounded-2xl border border-slate-800 text-white shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 p-6 rounded-2xl border border-slate-800 text-white shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-amber-400 text-xs font-bold uppercase tracking-wider">
                 <span className="material-symbols-outlined text-[18px]">timer</span>

@@ -199,21 +199,23 @@ model MedicalRequest {
 }
 
 model MedicalReport {
-  id          String        @id // e.g. "REP-0081"
-  requestId   String        @unique
-  request     MedicalRequest @relation(fields: [requestId], references: [id])
-  employeeId  String
-  employee    Employee      @relation(fields: [employeeId], references: [id])
-  testId      String
-  test        MedicalTest   @relation(fields: [testId], references: [id])
-  vendorId    String
-  vendor      Vendor        @relation(fields: [vendorId], references: [id])
-  result      ReportResult  @default(FIT)
-  testDate    DateTime
-  validUntil  DateTime?
-  fileUrl     String?
-  remarks     String?
-  createdAt   DateTime      @default(now())
+  id           String         @id // e.g. "REP-0081"
+  requestId    String         @unique
+  request      MedicalRequest @relation(fields: [requestId], references: [id])
+  employeeId   String
+  employee     Employee       @relation(fields: [employeeId], references: [id])
+  testId       String
+  test         MedicalTest    @relation(fields: [testId], references: [id])
+  vendorId     String
+  vendor       Vendor         @relation(fields: [vendorId], references: [id])
+  result       ReportResult   @default(FIT)
+  testDate     DateTime
+  validUntil   DateTime?
+  fileUrl      String?
+  remarks      String?
+  labData      Json?
+  validityTerm String?
+  createdAt    DateTime       @default(now())
 }
 
 model Invoice {
@@ -288,4 +290,14 @@ model SlotAllocation {
   updatedAt      DateTime     @updatedAt
 
   @@unique([slotRequestId, vendorId])
+}
+
+model SystemSetting {
+  id                   String   @id @default("SYSTEM_DEFAULT")
+  slotExpiryDays       Int      @default(7)
+  autoExpireSlots      Boolean  @default(true)
+  slotExpiryBasis      String   @default("CREATED_DATE")
+  autoArchiveCompleted Boolean  @default(true)
+  updatedBy            String   @default("System Administrator")
+  updatedAt            DateTime @updatedAt
 }

@@ -1,9 +1,15 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import prisma from '../prisma';
 import { Role } from '@prisma/client';
 import { AuditService } from '../services/auditService';
 import { SettingsService } from '../services/settingsService';
+import { UserRepository } from '../repositories/userRepository';
+import { VendorRepository } from '../repositories/vendorRepository';
+import { RequestRepository } from '../repositories/requestRepository';
+import { ReportRepository } from '../repositories/reportRepository';
+import { InvoiceRepository } from '../repositories/invoiceRepository';
+import { SlotRepository } from '../repositories/slotRepository';
+import { MasterRepository } from '../repositories/masterRepository';
 
 export class AdminController {
   // ==========================================
@@ -11,15 +17,7 @@ export class AdminController {
   // ==========================================
   static async listUsers(req: Request, res: Response) {
     try {
-      const users = await prisma.user.findMany({
-        include: {
-          vendor: true,
-          _count: {
-            select: { requests: true, auditLogs: true }
-          }
-        },
-        orderBy: { createdAt: 'desc' }
-      });
+      const users = await UserRepository.listAllWithCounts();
 
       // Sanitize password hashes
       const sanitized = users.map(u => ({
@@ -50,9 +48,7 @@ export class AdminController {
       }
 
       // Check if username taken
-      const existing = await prisma.user.findUnique({
-        where: { username: username.toLowerCase().trim() }
-      });
+      const existing = await UserRepository.findByUsername(username);
       if (existing) {
         return res.status(400).json({ error: `Username '${username}' is already in use` });
       }
@@ -64,16 +60,13 @@ export class AdminController {
 
       const passwordHash = await bcrypt.hash(password, 10);
 
-      const user = await prisma.user.create({
-        data: {
-          username: username.toLowerCase().trim(),
-          name: name.trim(),
-          role: role as Role,
-          passwordHash,
-          vendorId: vendorId || null,
-          isActive: isActive !== undefined ? Boolean(isActive) : true
-        },
-        include: { vendor: true }
+      const user = await UserRepository.create({
+        username,
+        name: name.trim(),
+        role: role as Role,
+        passwordHash,
+        vendorId: vendorId || null,
+        isActive: isActive !== undefined ? Boolean(isActive) : true
       });
 
       await AuditService.log({
@@ -108,7 +101,7 @@ export class AdminController {
       const { id } = req.params;
       const { name, role, vendorId, isActive, password } = req.body;
 
-      const user = await prisma.user.findUnique({ where: { id } });
+      const user = await UserRepository.findById(id);
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
       }
@@ -122,11 +115,7 @@ export class AdminController {
         updateData.passwordHash = await bcrypt.hash(password.trim(), 10);
       }
 
-      const updated = await prisma.user.update({
-        where: { id },
-        data: updateData,
-        include: { vendor: true }
-      });
+      const updated = await UserRepository.update(id, updateData);
 
       await AuditService.log({
         userId: req.user?.id,
@@ -162,19 +151,16 @@ export class AdminController {
         return res.status(400).json({ error: 'Cannot delete your own active administrator account' });
       }
 
-      const user = await prisma.user.findUnique({ where: { id } });
+      const user = await UserRepository.findById(id);
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
       }
 
       // Check if user has associated records
-      const hasRequests = await prisma.medicalRequest.count({ where: { createdById: id } });
+      const hasRequests = await RequestRepository.count({ createdById: id });
       if (hasRequests > 0) {
         // Deactivate instead of hard delete to preserve audit integrity
-        await prisma.user.update({
-          where: { id },
-          data: { isActive: false }
-        });
+        await UserRepository.update(id, { isActive: false });
 
         await AuditService.log({
           userId: req.user?.id,
@@ -189,7 +175,7 @@ export class AdminController {
         return res.json({ message: `User '${user.username}' deactivated (historical records preserved)` });
       }
 
-      await prisma.user.delete({ where: { id } });
+      await UserRepository.delete(id);
 
       await AuditService.log({
         userId: req.user?.id,
@@ -212,55 +198,108 @@ export class AdminController {
   // ==========================================
   static async createClinic(req: Request, res: Response) {
     try {
-      const { code, name, sapVendorNo, crNumber, vatNumber, tier, saudization, notes } = req.body;
+      const {
+        code,
+        name,
+        sapVendorNo,
+        crNumber,
+        vatNumber,
+        tier,
+        saudization,
+        notes,
+        contractNo: customContractNo,
+        paymentTerms,
+        invoicingType
+      } = req.body;
+
       if (!code || !name) {
         return res.status(400).json({ error: 'Clinic code and name are required' });
       }
 
+      const cleanCode = code.toUpperCase().trim();
+      const existingVendor = await VendorRepository.findByCode(cleanCode);
+      if (existingVendor) {
+        return res.status(400).json({ error: `Provider code '${cleanCode}' is already registered.` });
+      }
+
       // Autogenerate sequential ID if needed (e.g. V6, V7)
-      const count = await prisma.vendor.count();
-      const id = `V${count + 1}`;
-
-      const clinic = await prisma.vendor.create({
-        data: {
-          id,
-          code: code.toUpperCase().trim(),
-          name: name.trim(),
-          sapVendorNo: sapVendorNo || null,
-          crNumber: crNumber || null,
-          vatNumber: vatNumber || null,
-          tier: tier || 'Tier 2 Subcontractor',
-          saudization: saudization ? Number(saudization) : 35.0,
-          notes: notes || null,
-          isActive: true
+      const existingVendors = await VendorRepository.listAllIds();
+      let maxV = 5;
+      existingVendors.forEach(v => {
+        const m = v.id.match(/^V(\d+)$/);
+        if (m) {
+          const num = parseInt(m[1], 10);
+          if (num > maxV) maxV = num;
         }
       });
+      const id = `V${maxV + 1}`;
 
-      // Automatically create a default contract placeholder
-      const contractNo = `462000${Math.floor(1000 + Math.random() * 9000)}`;
-      await prisma.contract.create({
-        data: {
-          vendorId: clinic.id,
-          contractNo,
-          startDate: new Date(),
-          endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)),
-          invoicingType: 'Ariba portal',
-          paymentTerms: 30,
-          notes: ['Contract generated via Admin Portal']
-        }
+      const clinic = await VendorRepository.create({
+        id,
+        code: cleanCode,
+        name: name.trim(),
+        sapVendorNo: sapVendorNo || null,
+        crNumber: crNumber || null,
+        vatNumber: vatNumber || null,
+        tier: tier || 'Tier 1 Primary',
+        saudization: saudization ? Number(saudization) : 40.0,
+        notes: notes || 'Accredited Medical Center',
+        isActive: true
       });
+
+      // Automatically create an active contract with sequential SAP outline agreement number
+      const existingContractsCount = await MasterRepository.countContracts();
+      const contractNo = customContractNo ? String(customContractNo).trim() : `462000${String(existingContractsCount + 1001).padStart(4, '0')}`;
+      const contract = await MasterRepository.createContract({
+        vendorId: clinic.id,
+        contractNo,
+        startDate: new Date(),
+        endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)),
+        invoicingType: invoicingType || 'Ariba portal',
+        paymentTerms: paymentTerms ? Number(paymentTerms) : 30,
+        notes: ['Contract generated via Medical Provider Registry']
+      });
+
+      // Attach benchmark rate schedule for primary standard tests
+      const benchmarkRates: Array<{ testId: string; rate: number }> = [
+        { testId: '5004955', rate: 185.0 }, // Sadara Medical
+        { testId: '5004959', rate: 110.0 }, // SABIC Screening
+        { testId: '5004961', rate: 40.0 },  // Aramco driver
+        { testId: '5004956', rate: 50.0 },  // Iqama medical
+        { testId: '5004966', rate: 35.0 }   // Driving licence
+      ];
+
+      for (const br of benchmarkRates) {
+        try {
+          const testExists = await MasterRepository.findTestById(br.testId);
+          if (testExists) {
+            await MasterRepository.createContractRate({
+              contractId: contract.id,
+              testId: br.testId,
+              rate: br.rate,
+              includesVat: false
+            });
+          }
+        } catch (_) {
+          // Ignore rate insert error if already exists
+        }
+      }
 
       await AuditService.log({
         userId: req.user?.id,
-        actorName: req.user?.name || 'Administrator',
-        role: Role.ADMIN,
+        actorName: req.user?.name || 'Medical Administrator',
+        role: req.user?.role || Role.ADMIN,
         action: 'CREATE_CLINIC',
         entityType: 'Vendor',
         entityId: clinic.id,
-        details: `Onboarded new accredited clinic '${clinic.name}' (${clinic.code}) with SAP Vendor #${clinic.sapVendorNo}`
+        details: `Onboarded new accredited clinic '${clinic.name}' (${clinic.code}) with SAP Vendor #${clinic.sapVendorNo || 'N/A'}`
       });
 
-      return res.status(201).json({ clinic });
+      return res.status(201).json({
+        success: true,
+        clinic,
+        message: `Successfully onboarded ${clinic.name} (${clinic.code}) with Contract #${contractNo}!`
+      });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
@@ -271,19 +310,16 @@ export class AdminController {
       const { id } = req.params;
       const { name, sapVendorNo, crNumber, vatNumber, tier, saudization, status, notes, isActive } = req.body;
 
-      const clinic = await prisma.vendor.update({
-        where: { id },
-        data: {
-          name: name !== undefined ? name.trim() : undefined,
-          sapVendorNo: sapVendorNo !== undefined ? sapVendorNo : undefined,
-          crNumber: crNumber !== undefined ? crNumber : undefined,
-          vatNumber: vatNumber !== undefined ? vatNumber : undefined,
-          tier: tier !== undefined ? tier : undefined,
-          saudization: saudization !== undefined ? Number(saudization) : undefined,
-          status: status !== undefined ? status : undefined,
-          notes: notes !== undefined ? notes : undefined,
-          isActive: isActive !== undefined ? Boolean(isActive) : undefined
-        }
+      const clinic = await VendorRepository.update(id, {
+        name: name !== undefined ? name.trim() : undefined,
+        sapVendorNo: sapVendorNo !== undefined ? sapVendorNo : undefined,
+        crNumber: crNumber !== undefined ? crNumber : undefined,
+        vatNumber: vatNumber !== undefined ? vatNumber : undefined,
+        tier: tier !== undefined ? tier : undefined,
+        saudization: saudization !== undefined ? Number(saudization) : undefined,
+        status: status !== undefined ? status : undefined,
+        notes: notes !== undefined ? notes : undefined,
+        isActive: isActive !== undefined ? Boolean(isActive) : undefined
       });
 
       await AuditService.log({
@@ -302,6 +338,31 @@ export class AdminController {
     }
   }
 
+  static async deleteClinic(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const clinic = await VendorRepository.findById(id);
+      if (!clinic) return res.status(404).json({ error: 'Clinic not found' });
+
+      // Clean up relations & delete clinic through Data Tier repository
+      await VendorRepository.delete(id);
+
+      await AuditService.log({
+        userId: req.user?.id,
+        actorName: req.user?.name || 'Administrator',
+        role: req.user?.role || Role.ADMIN,
+        action: 'DELETE_CLINIC',
+        entityType: 'Vendor',
+        entityId: id,
+        details: `Deleted accredited clinic '${clinic.name}' (${clinic.code})`
+      });
+
+      return res.json({ success: true, message: `Successfully removed clinic ${clinic.name}` });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
   // ==========================================
   // 3. Contracts & Rate Cards
   // ==========================================
@@ -312,19 +373,16 @@ export class AdminController {
         return res.status(400).json({ error: 'vendorId and contractNo are required' });
       }
 
-      const contract = await prisma.contract.create({
-        data: {
-          vendorId,
-          contractNo: String(contractNo).trim(),
-          quoteNo: quoteNo ? String(quoteNo).trim() : null,
-          startDate: startDate ? new Date(startDate) : new Date(),
-          endDate: endDate ? new Date(endDate) : new Date(new Date().setFullYear(new Date().getFullYear() + 1)),
-          invoicingType: invoicingType || 'Ariba portal',
-          paymentTerms: paymentTerms ? Number(paymentTerms) : 30,
-          notes: Array.isArray(notes) ? notes : notes ? [notes] : []
-        },
-        include: { vendor: true }
-      });
+      const contract: any = await MasterRepository.createContract({
+        vendorId,
+        contractNo: String(contractNo).trim(),
+        quoteNo: quoteNo ? String(quoteNo).trim() : null,
+        startDate: startDate ? new Date(startDate) : new Date(),
+        endDate: endDate ? new Date(endDate) : new Date(new Date().setFullYear(new Date().getFullYear() + 1)),
+        invoicingType: invoicingType || 'Ariba portal',
+        paymentTerms: paymentTerms ? Number(paymentTerms) : 30,
+        notes: Array.isArray(notes) ? notes : notes ? [notes] : []
+      }, true);
 
       await AuditService.log({
         userId: req.user?.id,
@@ -333,7 +391,7 @@ export class AdminController {
         action: 'CREATE_CONTRACT',
         entityType: 'Contract',
         entityId: contract.id,
-        details: `Created SAP Contract #${contract.contractNo} for clinic ${contract.vendor.name}`
+        details: `Created SAP Contract #${contract.contractNo} for clinic ${contract.vendor?.name || vendorId}`
       });
 
       return res.status(201).json({ contract });
@@ -349,22 +407,12 @@ export class AdminController {
         return res.status(400).json({ error: 'contractId, testId, and rate are required' });
       }
 
-      const contractRate = await prisma.contractRate.upsert({
-        where: {
-          contractId_testId: { contractId, testId }
-        },
-        update: {
-          rate: Number(rate),
-          includesVat: Boolean(includesVat)
-        },
-        create: {
-          contractId,
-          testId,
-          rate: Number(rate),
-          includesVat: Boolean(includesVat)
-        },
-        include: { test: true }
-      });
+      const contractRate = await MasterRepository.upsertContractRate(
+        contractId,
+        testId,
+        Number(rate),
+        Boolean(includesVat)
+      );
 
       await AuditService.log({
         userId: req.user?.id,
@@ -385,7 +433,7 @@ export class AdminController {
   static async deleteContractRate(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      await prisma.contractRate.delete({ where: { id } });
+      await MasterRepository.deleteContractRate(id);
       return res.json({ message: 'Rate card entry removed' });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
@@ -409,19 +457,16 @@ export class AdminController {
         totalInvoices,
         roleStats
       ] = await Promise.all([
-        prisma.user.count(),
-        prisma.user.count({ where: { isActive: true } }),
-        prisma.vendor.count(),
-        prisma.vendor.count({ where: { isActive: true } }),
-        prisma.contract.count(),
-        prisma.contractRate.count(),
-        prisma.medicalRequest.count(),
-        prisma.medicalReport.count(),
-        prisma.invoice.count(),
-        prisma.user.groupBy({
-          by: ['role'],
-          _count: { id: true }
-        })
+        UserRepository.count(),
+        UserRepository.count({ isActive: true }),
+        VendorRepository.count(),
+        VendorRepository.count({ isActive: true }),
+        MasterRepository.countContracts(),
+        MasterRepository.countContractRates(),
+        RequestRepository.count(),
+        ReportRepository.count(),
+        InvoiceRepository.count(),
+        UserRepository.groupByRole()
       ]);
 
       const roleBreakdown: Record<string, number> = {};
@@ -454,16 +499,8 @@ export class AdminController {
       const settings = await SettingsService.getSettings();
       const expiryDays = settings.slotExpiryDays || 7;
 
-      // Query all slot requests to assess active vs expired status
-      const slotRequests = await prisma.slotRequest.findMany({
-        include: {
-          test: true,
-          allocations: {
-            include: { vendor: true }
-          }
-        },
-        orderBy: { createdAt: 'desc' }
-      });
+      // Query all slot requests via Data Tier to assess active vs expired status
+      const slotRequests = await SlotRepository.list();
 
       const now = new Date();
       const slotsWithExpiry = slotRequests.map(sr => {
@@ -542,15 +579,12 @@ export class AdminController {
   static async expireSlot(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const slotRequest = await prisma.slotRequest.findUnique({ where: { id } });
+      const slotRequest = await SlotRepository.findById(id);
       if (!slotRequest) {
         return res.status(404).json({ error: 'Slot request not found' });
       }
 
-      await prisma.slotRequest.update({
-        where: { id },
-        data: { status: 'EXPIRED' }
-      });
+      await SlotRepository.update(id, { status: 'EXPIRED' });
 
       await AuditService.log({
         userId: req.user?.id,
@@ -571,18 +605,15 @@ export class AdminController {
   static async restoreSlot(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const slotRequest = await prisma.slotRequest.findUnique({ where: { id } });
+      const slotRequest = await SlotRepository.findById(id);
       if (!slotRequest) {
         return res.status(404).json({ error: 'Slot request not found' });
       }
 
       const settings = await SettingsService.getSettings();
-      const updated = await prisma.slotRequest.update({
-        where: { id },
-        data: {
-          status: 'PENDING',
-          createdAt: new Date()
-        }
+      const updated = await SlotRepository.update(id, {
+        status: 'PENDING',
+        createdAt: new Date()
       });
 
       await AuditService.log({

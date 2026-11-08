@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useTheme } from '../../theme/ThemeContext';
 import { ThemeSelectorModal } from '../ui/ThemeSelectorModal';
-import { api } from '../../api/client';
 
 interface TopHeaderProps {
   currentTabLabel: string;
@@ -22,19 +21,11 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 }) => {
   const { theme } = useTheme();
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
-  const [healthInfo, setHealthInfo] = useState<any>(null);
-  const [showHealthPopover, setShowHealthPopover] = useState(false);
-
-  useEffect(() => {
-    api.getHealth()
-      .then(res => setHealthInfo(res.data))
-      .catch(() => setHealthInfo({ status: 'ONLINE', gateway: 'Local Port 5000' }));
-  }, []);
 
   return (
     <>
       <header className="h-16 bg-white border-b border-slate-200/90 px-6 flex items-center justify-between shrink-0 select-none sticky top-0 z-30">
-        {/* Breadcrumb Navigation & Live Status */}
+        {/* Breadcrumb Navigation */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
             <span className="material-symbols-outlined text-[17px] text-slate-400">domain</span>
@@ -43,58 +34,6 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <span className="text-slate-700">Medical Clearance</span>
             <span>/</span>
             <span className="text-secondary font-bold">{currentTabLabel}</span>
-          </div>
-
-          {/* Live 3-Tier Architecture Telemetry Badge */}
-          <div className="relative hidden lg:block">
-            <button
-              onClick={() => setShowHealthPopover(!showHealthPopover)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold cursor-pointer transition-colors"
-              title="Click to view 3-Tier Architecture Health & DB telemetry"
-            >
-              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>3-Tier Active</span>
-              <span className="text-[10px] text-emerald-600 font-mono font-normal">
-                (Port 5000 &bull; Neon DB)
-              </span>
-            </button>
-
-            {showHealthPopover && healthInfo && (
-              <div className="absolute top-9 left-0 w-72 bg-white rounded-xl shadow-xl border border-slate-200 p-3.5 z-50 text-xs animate-fade-in space-y-2">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-100 font-bold text-slate-800">
-                  <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[16px] text-emerald-600">dns</span>
-                    <span>3-Tier Architecture Health</span>
-                  </span>
-                  <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 text-[10px] font-mono">
-                    {healthInfo.status}
-                  </span>
-                </div>
-                <div className="space-y-1.5 text-[11px] text-slate-600">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Application Tier:</span>
-                    <strong className="text-slate-700">{healthInfo.gateway || 'Local Express (Port 5000)'}</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Database Tier:</span>
-                    <strong className="text-slate-700">{healthInfo.database?.engine || 'PostgreSQL (Neon)'}</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Query Latency:</span>
-                    <strong className="text-emerald-700 font-mono">{healthInfo.database?.latencyMs || '22ms'}</strong>
-                  </div>
-                  {healthInfo.records && (
-                    <div className="pt-2 border-t border-slate-100 flex justify-between font-mono text-[10.5px] text-slate-700">
-                      <span>{healthInfo.records.employees} Workers</span>
-                      <span>&bull;</span>
-                      <span>{healthInfo.records.requests} Requests</span>
-                      <span>&bull;</span>
-                      <span>{healthInfo.records.clinics} Clinics</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
@@ -107,10 +46,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 <>
                   <button
                     onClick={() => onNavigateToTab('intake')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-900 border border-orange-200/70 text-xs font-semibold transition-colors cursor-pointer"
                     title="Workforce Intake & Pre-Booking"
                   >
-                    <span className="material-symbols-outlined text-[16px] text-emerald-700">add_circle</span>
+                    <span className="material-symbols-outlined text-[16px] text-secondary">add_circle</span>
                     <span>+ New Request / Pre-Book</span>
                   </button>
                   <button
@@ -128,10 +67,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 <>
                   <button
                     onClick={() => onNavigateToTab('slots')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-900 border border-orange-200/70 text-xs font-semibold transition-colors cursor-pointer"
                     title="Medical Slot Portal / Allocation Queue"
                   >
-                    <span className="material-symbols-outlined text-[16px] text-emerald-700">calendar_month</span>
+                    <span className="material-symbols-outlined text-[16px] text-secondary">calendar_month</span>
                     <span>Slot Allocation Queue</span>
                   </button>
                   <button

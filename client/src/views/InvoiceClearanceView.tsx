@@ -27,7 +27,7 @@ export const InvoiceClearanceView: React.FC = () => {
     try {
       const res = await api.auditInvoice(invoiceId);
       setSelectedAudit(res.data);
-      setSesReference(`SES-${Math.floor(10000 + Math.random() * 90000)}`);
+      setSesReference('');
     } catch (e: any) {
       alert(`Audit fetch failed: ${e.response?.data?.error || e.message}`);
     }
@@ -68,13 +68,68 @@ export const InvoiceClearanceView: React.FC = () => {
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div className="pb-4 border-b border-slate-200">
-        <div className="flex items-center gap-2">
-          <span className="material-symbols-outlined text-secondary text-2xl">receipt_long</span>
+      <div className="pb-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-secondary/10 text-secondary flex items-center justify-center shrink-0">
+            <span className="material-symbols-outlined text-2xl">receipt_long</span>
+          </div>
           <div>
             <h2 className="font-display font-extrabold text-xl text-slate-900">Finance Invoice Clearance & 3-Way Match</h2>
-            <p className="text-xs text-slate-400">Reconcile clinic billing against contracted SAP material rates and completed medical reports</p>
+            <p className="text-xs text-slate-500">Reconcile clinic billing against contracted SAP material rates and completed medical reports</p>
           </div>
+        </div>
+
+        <button
+          onClick={loadInvoices}
+          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer border border-slate-200 shrink-0 self-start sm:self-auto"
+        >
+          <span className="material-symbols-outlined text-[17px]">refresh</span>
+          <span>Refresh Invoices</span>
+        </button>
+      </div>
+
+      {/* KPI Metric Strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Invoices</span>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="font-display font-extrabold text-2xl text-slate-900">{invoices.length}</span>
+            <span className="text-xs text-slate-500 font-semibold">Registered</span>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">From contracted medical centers</p>
+        </div>
+
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Pending 3-Way Audit</span>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="font-display font-extrabold text-2xl text-amber-600">
+              {invoices.filter(i => i.status === 'SUBMITTED').length}
+            </span>
+            <span className="text-xs text-amber-600/80 font-bold">Action Needed</span>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">Awaiting price schedule check</p>
+        </div>
+
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cleared & SES Issued</span>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="font-display font-extrabold text-2xl text-emerald-600">
+              {invoices.filter(i => i.status === 'CLEARED').length}
+            </span>
+            <span className="text-xs text-emerald-600/80 font-bold">Approved</span>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">Ready for SAP ERP disbursement</p>
+        </div>
+
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Billed Value</span>
+          <div className="mt-1 flex items-baseline gap-1">
+            <span className="text-xs text-slate-500 font-bold">SAR</span>
+            <span className="font-display font-extrabold text-2xl text-slate-900">
+              {invoices.reduce((acc, inv) => acc + Number(inv.totalAmount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">Inclusive of 15% standard VAT</p>
         </div>
       </div>
 

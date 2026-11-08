@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api/client';
+import { SlotAssignmentModal } from '../components/slots/SlotAssignmentModal';
 
 interface ClinicSlotItem {
   id: string;
@@ -24,6 +25,8 @@ interface SlotRequestItem {
   plant?: string;
   requestedSlots: number;
   allocatedSlots: number;
+  assignedSlots?: number;
+  remainingSlots?: number;
   status: string;
   needByDate?: string;
   note?: string;
@@ -62,8 +65,8 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
   userName = '',
   onSwitchRole
 }) => {
-  // Strict Role Guardrail: Medical Slot Portal is exclusively for Central Medical Team & Admin
-  if (userRole !== 'CENTRAL' && userRole !== 'ADMIN') {
+  // Strict Role Guardrail: Medical Slot Portal is for HR, Requester, Central Medical Team & Admin
+  if (!['CENTRAL', 'ADMIN', 'HR', 'REQUESTER'].includes(userRole)) {
     return (
       <div className="min-h-[75vh] flex items-center justify-center p-6 bg-[#F8FAF9]">
         <div className="bg-white border border-slate-200 rounded-3xl p-8 max-w-md w-full text-center space-y-4 shadow-sm animate-in fade-in duration-200">
@@ -71,9 +74,9 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
             <span className="material-symbols-outlined text-[28px]">lock</span>
           </div>
           <div>
-            <h3 className="font-display font-extrabold text-lg text-slate-900">Access Restricted to Central Medical Team</h3>
+            <h3 className="font-display font-extrabold text-lg text-slate-900">Access Restricted</h3>
             <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              The Medical Slot Portal is exclusively reserved for the <strong>Central Medical Team</strong> to triage and dispatch clinic quotas.
+              The Medical Slot Portal is reserved for HR Coordinators and the <strong>Central Medical Team</strong> to pre-book and dispatch clinic quotas.
             </p>
           </div>
           <div className="pt-2">
@@ -110,6 +113,9 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
   const [showExpired, setShowExpired] = useState<boolean>(false);
   const [expiredCount, setExpiredCount] = useState<number>(0);
 
+  // Workforce Assignment Modal State
+  const [assigningSlotId, setAssigningSlotId] = useState<string | null>(null);
+
   // Selected request in queue (which card is active/expanded for clinic assignment)
   const [selectedReqId, setSelectedReqId] = useState<string | null>(null);
 
@@ -125,7 +131,9 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
   const [priceLoading, setPriceLoading] = useState(false);
 
   // Pre-Book New Slots Modal State (For HR or Central Team)
+  const [masterTests, setMasterTests] = useState<any[]>([]);
   const [isPreBookModalOpen, setIsPreBookModalOpen] = useState(false);
+  const [newTestId, setNewTestId] = useState('5004955');
   const [newTitle, setNewTitle] = useState('Sadara Medical');
   const [newDept, setNewDept] = useState('PMTA');
   const [newPlant, setNewPlant] = useState('Sadara Complex (Jubail)');
@@ -136,8 +144,8 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
 
   // Console view options (Procurement rates vs Central Medical Team queue)
   const isProcurementRole = selectedRoleView === 'Procurement central';
-  const isCentralOrAdmin = true;
-  const isHrRole = false;
+  const isCentralOrAdmin = userRole === 'CENTRAL' || userRole === 'ADMIN';
+  const isHrRole = userRole === 'HR' || userRole === 'REQUESTER';
 
   // Handle Role Switching from Dropdown
   const handleRoleViewChange = async (newView: string) => {
@@ -154,6 +162,15 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
 
   useEffect(() => {
     loadQueueData();
+    api.getTests().then(res => {
+      if (res.data?.tests) {
+        setMasterTests(res.data.tests);
+        if (res.data.tests.length > 0) {
+          setNewTestId(res.data.tests[0].id);
+          setNewTitle(res.data.tests[0].name);
+        }
+      }
+    }).catch(console.error);
   }, [showExpired]);
 
   const showToast = (msg: string) => {
@@ -404,8 +421,10 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
 
     try {
       setSubmittingPreBook(true);
+      const matchedTest = masterTests.find(t => t.id === newTestId);
       const res = await api.createSlotRequest({
-        title: newTitle,
+        title: matchedTest ? matchedTest.name : newTitle,
+        testId: newTestId,
         department: newDept,
         plant: newPlant,
         requestedSlots: newSlots,
@@ -446,12 +465,12 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#F8FAF9]">
+    <div className="flex flex-col min-h-screen bg-slate-50">
       {/* 1. Portal Top Navigation Bar */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0 shadow-2xs">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 font-display font-extrabold text-slate-900 text-base">
-            <span className="material-symbols-outlined text-emerald-700 text-[22px]">calendar_month</span>
+            <span className="material-symbols-outlined text-secondary text-[22px]">calendar_month</span>
             <span>Medical Slot Portal</span>
           </div>
           <span className="text-slate-300">|</span>
@@ -461,8 +480,8 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl text-xs font-semibold text-emerald-800">
-            <span className="text-emerald-600 font-normal">Console:</span>
+          <div className="hidden sm:flex items-center gap-1.5 bg-orange-50 border border-orange-200 px-3 py-1 rounded-xl text-xs font-semibold text-orange-800">
+            <span className="text-secondary font-normal">Console:</span>
             <span className="font-bold">Central Medical Team</span>
           </div>
 
@@ -478,7 +497,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
           <button
             type="button"
             onClick={() => setIsPreBookModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-secondary hover:bg-secondary-hover text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer"
           >
             <span className="material-symbols-outlined text-[16px]">add_box</span>
             <span>+ Pre-Book Slots</span>
@@ -489,22 +508,22 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-xl flex items-center gap-2.5 animate-in slide-in-from-bottom-2 duration-150 border border-slate-700">
-          <span className="material-symbols-outlined text-emerald-400 text-[18px]">check_circle</span>
+          <span className="material-symbols-outlined text-secondary text-[18px]">check_circle</span>
           <span>{toastMessage}</span>
         </div>
       )}
 
       {/* 2. Main Portal Body: Left Dark Sidebar + Right Content Area */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Left Dark Sidebar */}
-        <div className="w-64 bg-[#142623] text-white flex flex-col justify-between p-4 border-r border-[#1a332f] shrink-0 select-none overflow-y-auto">
+        {/* Left Dark Sidebar - Matches Expertise Dark Navy Theme */}
+        <div className="w-64 bg-[#0A0F1D] text-white flex flex-col justify-between p-4 border-r border-slate-800 shrink-0 select-none overflow-y-auto">
           <div className="space-y-5">
             <div>
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-emerald-400 text-[20px]">calendar_month</span>
+                <span className="material-symbols-outlined text-secondary text-[20px]">calendar_month</span>
                 <span className="font-display font-extrabold text-sm text-white tracking-wide">Medical Slot Portal</span>
               </div>
-              <div className="text-[11px] text-emerald-200/70 font-medium pl-7">
+              <div className="text-[11px] text-slate-400 font-medium pl-7">
                 Expertise workforce
               </div>
             </div>
@@ -514,12 +533,12 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
               <select
                 value={selectedRoleView}
                 onChange={(e) => handleRoleViewChange(e.target.value)}
-                className="w-full bg-[#1b3430] border border-[#284943] text-emerald-100 text-xs font-semibold rounded-lg px-3 py-2 pr-7 appearance-none focus:outline-none focus:border-emerald-400 cursor-pointer"
+                className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs font-semibold rounded-lg px-3 py-2 pr-7 appearance-none focus:outline-none focus:border-secondary cursor-pointer"
               >
                 <option value="Procurement central">Procurement central</option>
                 <option value="Central Medical Team">Central Medical Team</option>
               </select>
-              <span className="material-symbols-outlined absolute right-2.5 top-2.5 text-emerald-300 text-[16px] pointer-events-none">
+              <span className="material-symbols-outlined absolute right-2.5 top-2.5 text-slate-400 text-[16px] pointer-events-none">
                 expand_more
               </span>
             </div>
@@ -531,12 +550,12 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                 onClick={() => setActiveMenu('queue')}
                 className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   activeMenu === 'queue'
-                    ? 'bg-[#21433e] text-emerald-300 shadow-sm'
-                    : 'text-slate-300 hover:text-white hover:bg-[#1a3430]'
+                    ? 'bg-secondary/15 text-secondary border border-secondary/30 shadow-xs'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
                 }`}
               >
                 <span>Allocation queue</span>
-                <span className="h-5 min-w-[20px] px-1.5 rounded-full bg-emerald-600 text-white font-mono text-[10.5px] font-extrabold flex items-center justify-center">
+                <span className="h-5 min-w-[20px] px-1.5 rounded-full bg-secondary text-white font-mono text-[10.5px] font-extrabold flex items-center justify-center">
                   {queue.length}
                 </span>
               </button>
@@ -546,40 +565,42 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                 onClick={() => setActiveMenu('by-clinic')}
                 className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   activeMenu === 'by-clinic'
-                    ? 'bg-[#21433e] text-emerald-300 shadow-sm'
-                    : 'text-slate-300 hover:text-white hover:bg-[#1a3430]'
+                    ? 'bg-secondary/15 text-secondary border border-secondary/30 shadow-xs'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
                 }`}
               >
                 <span>Allocations by clinic</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => setActiveMenu('price-comparison')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  activeMenu === 'price-comparison'
-                    ? 'bg-[#21433e] text-emerald-300 shadow-sm'
-                    : 'text-slate-300 hover:text-white hover:bg-[#1a3430]'
-                }`}
-              >
-                <span>Price comparison</span>
-              </button>
+              {!isHrRole && (
+                <button
+                  type="button"
+                  onClick={() => setActiveMenu('price-comparison')}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    activeMenu === 'price-comparison'
+                      ? 'bg-secondary/15 text-secondary border border-secondary/30 shadow-xs'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  <span>Price comparison</span>
+                </button>
+              )}
             </nav>
           </div>
 
           {/* Quick Pre-Book Card in Sidebar */}
-          <div className="bg-[#1b3430] border border-[#284943] rounded-xl p-3.5 text-xs space-y-2 mt-4">
-            <div className="font-bold text-emerald-200 flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-[16px] text-emerald-400">group_add</span>
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 text-xs space-y-2 mt-4">
+            <div className="font-bold text-slate-200 flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[16px] text-secondary">group_add</span>
               <span>Need Slots for 50?</span>
             </div>
-            <p className="text-[11px] text-slate-300 leading-relaxed">
+            <p className="text-[11px] text-slate-400 leading-relaxed">
               Pre-book quota in advance when employee names are not yet decided.
             </p>
             <button
               type="button"
               onClick={() => setIsPreBookModalOpen(true)}
-              className="w-full py-1.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-extrabold rounded-lg text-xs transition-colors cursor-pointer"
+              className="w-full py-1.5 bg-secondary hover:bg-secondary-hover text-white font-extrabold rounded-lg text-xs transition-colors shadow-sm cursor-pointer"
             >
               + Pre-Book 50 Slots
             </button>
@@ -603,6 +624,25 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {expiredCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowExpired(prev => !prev);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
+                        showExpired
+                          ? 'bg-amber-100 text-amber-900 border-amber-300'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[15px]">
+                        {showExpired ? 'visibility_off' : 'visibility'}
+                      </span>
+                      <span>{showExpired ? `Hide Disappeared (${expiredCount})` : `Show ${expiredCount} Disappeared`}</span>
+                    </button>
+                  )}
                   <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
                     {queue.length} Requests in Queue
                   </span>
@@ -616,43 +656,6 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                     <span className={`material-symbols-outlined text-[18px] ${loading ? 'animate-spin' : ''}`}>refresh</span>
                   </button>
                 </div>
-              </div>
-
-              {/* Central Medical Team Notice Banner */}
-              <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200 text-emerald-900 text-xs flex items-center gap-2.5">
-                <span className="material-symbols-outlined text-emerald-700 text-[20px]">medical_services</span>
-                <span>
-                  <strong>Central Medical Team Console:</strong> Review incoming pre-booked slot requests sent by HR. Click any request below to assign slots across different clinics or the same clinic using the <strong>clinic dropdowns</strong>, then confirm allocation.
-                </span>
-              </div>
-
-              {/* Slot Governance Auto-Disappearance Banner */}
-              <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-slate-50 border border-slate-200/90 rounded-xl text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="material-symbols-outlined text-amber-600 text-[18px]">timer</span>
-                  <span className="text-slate-600">
-                    <strong>Slot Auto-Disappearance Governance:</strong> Pre-booked slots automatically disappear in <strong className="text-slate-900">${slotExpiryDays} days</strong> after pre-booking (configurable in Admin).
-                  </span>
-                </div>
-                {expiredCount > 0 && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowExpired(prev => !prev);
-                    }}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
-                      showExpired
-                        ? 'bg-amber-100 text-amber-900 border-amber-300'
-                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="material-symbols-outlined text-[14px]">
-                      {showExpired ? 'visibility_off' : 'visibility'}
-                    </span>
-                    <span>{showExpired ? `Hide Disappeared (${expiredCount})` : `Show ${expiredCount} Disappeared / Expired`}</span>
-                  </button>
-                )}
               </div>
 
               {loading ? (
@@ -681,7 +684,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                         onClick={() => setSelectedReqId(isSelected ? null : req.id)}
                         className={`bg-white border rounded-2xl p-5 shadow-2xs space-y-4 transition-all cursor-pointer ${
                           isSelected
-                            ? 'border-emerald-600 ring-2 ring-emerald-600/10'
+                            ? 'border-secondary ring-2 ring-secondary/20 shadow-xs'
                             : 'border-slate-200 hover:border-slate-300'
                         }`}
                       >
@@ -694,11 +697,14 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                             <span className="font-display font-bold text-slate-800 text-base">
                               {req.title}
                             </span>
-                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#E6F3EE] text-[#14532D] border border-emerald-200">
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
                               {req.department}
                             </span>
                             <span className="text-xs text-slate-500 font-medium">
                               {req.requestedSlots} slots requested
+                            </span>
+                            <span className="px-2 py-0.5 rounded text-[10.5px] font-bold bg-orange-50 text-orange-800 border border-orange-200">
+                              {req.assignedSlots || 0}/{req.requestedSlots} assigned
                             </span>
                             <span
                               className={`px-2 py-0.5 rounded text-[10.5px] font-bold border flex items-center gap-1 ${
@@ -727,9 +733,21 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
+                                setAssigningSlotId(req.id);
+                              }}
+                              className="px-2.5 py-1 bg-secondary hover:bg-secondary-hover text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1 cursor-pointer"
+                              title="Assign or view employees for this slot quota"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">group</span>
+                              <span>Workforce ({req.assignedSlots || 0}/{req.requestedSlots})</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setSelectedReqId(isSelected ? null : req.id);
                               }}
-                              className="text-xs text-emerald-700 font-bold hover:underline flex items-center gap-0.5 cursor-pointer"
+                              className="text-xs text-secondary font-bold hover:underline flex items-center gap-0.5 cursor-pointer"
                             >
                               <span>{isSelected ? 'Less info' : 'Details'}</span>
                               <span className="material-symbols-outlined text-[16px]">
@@ -756,7 +774,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                                     value={row.vendorId}
                                     disabled={isHrRole}
                                     onChange={(e) => handleUpdateRowClinic(req.id, colIndex, e.target.value)}
-                                    className="w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 pr-7 focus:outline-none focus:border-emerald-600 focus:bg-white transition-all cursor-pointer truncate disabled:bg-slate-100 disabled:cursor-not-allowed"
+                                    className="w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 pr-7 focus:outline-none focus:border-secondary focus:bg-white transition-all cursor-pointer truncate disabled:bg-slate-100 disabled:cursor-not-allowed"
                                     title="Choose clinic for this allocation column"
                                   >
                                     {allClinics.map((c) => (
@@ -779,7 +797,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                                     value={row.slots}
                                     disabled={isHrRole}
                                     onChange={(e) => handleUpdateRowSlots(req.id, colIndex, e.target.value)}
-                                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 transition-all text-left disabled:bg-slate-50 disabled:cursor-not-allowed"
+                                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-secondary focus:ring-1 focus:ring-secondary/20 transition-all text-left disabled:bg-slate-50 disabled:cursor-not-allowed"
                                   />
                                 </div>
 
@@ -789,7 +807,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                                     <button
                                       type="button"
                                       onClick={() => handleAssignAllToThisColumn(req.id, colIndex, req.requestedSlots)}
-                                      className="hover:text-emerald-700 font-semibold hover:underline cursor-pointer"
+                                      className="hover:text-secondary font-semibold hover:underline cursor-pointer"
                                       title="Assign 100% of the requested slots to this clinic"
                                     >
                                       All {req.requestedSlots} here
@@ -839,7 +857,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                               <button
                                 type="button"
                                 onClick={() => handleAddClinicRow(req.id)}
-                                className="text-[11px] font-bold text-slate-500 hover:text-emerald-700 flex items-center gap-0.5 px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
+                                className="text-[11px] font-bold text-slate-500 hover:text-secondary flex items-center gap-0.5 px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
                                 title="Add another clinic column"
                               >
                                 <span className="material-symbols-outlined text-[14px]">add</span>
@@ -854,7 +872,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                               <button
                                 type="button"
                                 onClick={() => handleConfirmAllocation(req)}
-                                className="bg-[#184E42] hover:bg-[#123E34] text-white font-bold text-xs px-4 py-2 rounded-lg transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                                className="bg-secondary hover:bg-secondary-hover text-white font-bold text-xs px-4 py-2 rounded-lg transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
                               >
                                 <span className="material-symbols-outlined text-[15px]">check_circle</span>
                                 <span>Confirm allocation</span>
@@ -952,7 +970,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
 
                         <div className="text-right">
                           <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Total Slots</span>
-                          <span className="font-display font-extrabold text-2xl text-emerald-700">
+                          <span className="font-display font-extrabold text-2xl text-secondary">
                             {clinic.totalAllocatedSlots}
                           </span>
                         </div>
@@ -978,7 +996,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                                   {alloc.department}
                                 </span>
                               </div>
-                              <span className="font-mono font-bold text-emerald-700">
+                              <span className="font-mono font-bold text-primary">
                                 {alloc.allocatedSlots} slots
                               </span>
                             </div>
@@ -1012,13 +1030,13 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                 <div className="bg-white border border-slate-200 rounded-2xl shadow-2xs overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
-                      <thead className="bg-[#142623] text-white uppercase text-[10.5px] font-bold tracking-wider">
+                      <thead className="bg-[#131B35] text-white uppercase text-[10.5px] font-bold tracking-wider">
                         <tr>
                           <th className="py-3 px-4">Test Protocol / Package</th>
                           {priceData.clinics.map((c) => (
                             <th key={c.id} className="py-3 px-3 text-center">
                               <div>{c.name}</div>
-                              <div className="text-[9.5px] text-emerald-300 font-mono font-normal">({c.code})</div>
+                              <div className="text-[9.5px] text-slate-400 font-mono font-normal">({c.code})</div>
                             </th>
                           ))}
                           <th className="py-3 px-4 text-right">Optimal Rate</th>
@@ -1058,7 +1076,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                             <td className="py-3 px-4 text-right font-mono">
                               {test.lowestRate ? (
                                 <div>
-                                  <span className="font-bold text-emerald-700 text-sm">
+                                  <span className="font-bold text-secondary text-sm">
                                     SAR {test.lowestRate.toFixed(2)}
                                   </span>
                                   <div className="text-[10px] text-slate-400 truncate">
@@ -1085,14 +1103,14 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
       {isPreBookModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden">
-            <div className="bg-[#142623] text-white p-5 flex items-center justify-between">
+            <div className="bg-[#131B35] text-white p-5 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="h-9 w-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                <div className="h-9 w-9 rounded-xl bg-secondary/20 text-secondary flex items-center justify-center">
                   <span className="material-symbols-outlined text-[20px]">calendar_add_on</span>
                 </div>
                 <div>
                   <h3 className="font-display font-extrabold text-base text-white">Pre-Book Capacity Slots</h3>
-                  <p className="text-[11px] text-emerald-200/80">
+                  <p className="text-[11px] text-slate-300">
                     Send slot booking request for unassigned employees to Central Medical Team
                   </p>
                 </div>
@@ -1119,7 +1137,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                         type="button"
                         onClick={() => setNewSlots(cnt)}
                         className={`text-[10.5px] px-2 py-0.5 rounded font-bold cursor-pointer transition-all ${
-                          newSlots === cnt ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          newSlots === cnt ? 'bg-secondary text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                         }`}
                       >
                         {cnt}
@@ -1133,26 +1151,37 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                   value={newSlots}
                   onChange={(e) => setNewSlots(parseInt(e.target.value, 10) || 0)}
                   placeholder="e.g. 50"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-base font-extrabold text-slate-900 focus:outline-none focus:border-emerald-600"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-base font-extrabold text-slate-900 focus:outline-none focus:border-secondary"
                   required
                 />
               </div>
 
               <div>
                 <label className="block text-[11px] font-bold uppercase text-slate-500 tracking-wider mb-1">
-                  Medical Test Package
+                  Medical Test Package *
                 </label>
                 <select
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-emerald-600"
+                  value={newTestId}
+                  onChange={(e) => {
+                    const tid = e.target.value;
+                    setNewTestId(tid);
+                    const found = masterTests.find(t => t.id === tid);
+                    if (found) setNewTitle(found.name);
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-secondary"
                 >
-                  <option value="Sadara Medical">Sadara Medical (Annual Comprehensive)</option>
-                  <option value="SABIC Medical Screening">SABIC Medical Screening with TSH</option>
-                  <option value="Yanpet medical test">Yanpet petrochemical periodic test</option>
-                  <option value="Ma'aden medical test (PSA above 40)">Ma&apos;aden medical test</option>
-                  <option value="General medical fitness">General medical fitness</option>
+                  {masterTests.map(t => (
+                    <option key={t.id} value={t.id}>
+                      {t.id} — {t.name} ({t.validityMonths > 0 ? `${t.validityMonths} Months Validity` : 'One-off/swab'})
+                    </option>
+                  ))}
                 </select>
+                {masterTests.find(t => t.id === newTestId) && (
+                  <div className="mt-1 text-[11px] text-slate-400 flex items-center justify-between">
+                    <span>SAP Material Code: <strong className="text-slate-600 font-mono">{newTestId}</strong></span>
+                    <span>Accredited Clinics: <strong className="text-slate-600">{masterTests.find(t => t.id === newTestId)?.ratedClinics || 'BAK, GAMC'}</strong></span>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1224,7 +1253,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                 <button
                   type="submit"
                   disabled={submittingPreBook}
-                  className="bg-[#1E4A42] hover:bg-[#163832] text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                  className="bg-secondary hover:bg-secondary-hover text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all shadow-xs cursor-pointer disabled:opacity-50"
                 >
                   {submittingPreBook ? 'Submitting...' : `Send Request for ${newSlots} Slots`}
                 </button>
@@ -1232,6 +1261,16 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Workforce Slot Assignment Modal */}
+      {assigningSlotId && (
+        <SlotAssignmentModal
+          slotId={assigningSlotId}
+          isOpen={!!assigningSlotId}
+          onClose={() => setAssigningSlotId(null)}
+          onAssignmentUpdated={loadQueueData}
+        />
       )}
     </div>
   );

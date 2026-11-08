@@ -10,9 +10,11 @@ import { ClinicPortalView } from './views/ClinicPortalView';
 import { InvoiceClearanceView } from './views/InvoiceClearanceView';
 import { AuditLogView } from './views/AuditLogView';
 import { ReportsView } from './views/ReportsView';
+import { RatesView } from './views/RatesView';
 import { LoginView } from './views/LoginView';
 import { AdminView } from './views/AdminView';
 import { SlotPortalView } from './views/SlotPortalView';
+import { NotFoundView } from './views/NotFoundView';
 import { AccessRestrictedGuardrail } from './components/common/AccessRestrictedGuardrail';
 import { api } from './api/client';
 
@@ -24,7 +26,7 @@ export interface RoleConfig {
 
 export const ROLE_CONFIGS: Record<string, RoleConfig> = {
   HR: {
-    allowedTabs: ['dashboard', 'intake', 'requests', 'reports'],
+    allowedTabs: ['dashboard', 'intake', 'slots', 'requests', 'reports'],
     defaultTab: 'dashboard',
     label: 'HR Coordinator'
   },
@@ -34,7 +36,7 @@ export const ROLE_CONFIGS: Record<string, RoleConfig> = {
     label: 'HSE Coordinator'
   },
   CENTRAL: {
-    allowedTabs: ['slots', 'requests', 'reports', 'suppliers', 'dashboard'],
+    allowedTabs: ['slots', 'requests', 'reports', 'rates', 'suppliers', 'dashboard', 'audit'],
     defaultTab: 'slots',
     label: 'Central Medical Team'
   },
@@ -44,12 +46,12 @@ export const ROLE_CONFIGS: Record<string, RoleConfig> = {
     label: 'Accredited Medical Center'
   },
   FINANCE: {
-    allowedTabs: ['finance', 'dashboard', 'suppliers'],
+    allowedTabs: ['finance', 'rates', 'dashboard', 'suppliers', 'audit'],
     defaultTab: 'finance',
     label: 'Finance Controller'
   },
   ADMIN: {
-    allowedTabs: ['dashboard', 'intake', 'slots', 'requests', 'reports', 'clinic', 'finance', 'suppliers', 'audit', 'admin'],
+    allowedTabs: ['dashboard', 'intake', 'slots', 'requests', 'reports', 'clinic', 'finance', 'rates', 'suppliers', 'audit', 'admin'],
     defaultTab: 'admin',
     label: 'System Administrator'
   }
@@ -164,13 +166,9 @@ export function App() {
           navigate(`/${ROLE_CONFIGS[res.data.user.role]?.defaultTab || 'dashboard'}`);
         }
       }
-    } catch (e) {
-      console.error(e);
-      setUserRole(targetRole);
-      const allowed = ROLE_CONFIGS[targetRole]?.allowedTabs || ['dashboard'];
-      if (!allowed.includes(currentTab) && targetRole !== 'ADMIN') {
-        navigate(`/${ROLE_CONFIGS[targetRole]?.defaultTab || 'dashboard'}`);
-      }
+    } catch (e: any) {
+      console.error('Role switch failed on server:', e);
+      alert(e?.response?.data?.error || 'Role switch failed. Only administrators can switch roles.');
     }
   };
 
@@ -198,12 +196,15 @@ export function App() {
     slots: 'Medical Slot Portal',
     clinic: 'Clinic Portal',
     finance: 'Invoice Clearance',
+    rates: 'Rates & Wage Bands',
     suppliers: 'Clinics & Contracts',
     audit: 'System Audit Log',
     admin: 'System Administration'
   };
 
   const allowedTabs = ROLE_CONFIGS[userRole]?.allowedTabs || [];
+  const knownTabs = Object.keys(tabLabels);
+  const isKnownTab = currentPathSegment === '' || knownTabs.includes(currentPathSegment);
   const isTabAllowed = userRole === 'ADMIN' || allowedTabs.includes(currentTab);
 
   return (
@@ -230,7 +231,9 @@ export function App() {
         />
 
         <main className="flex-1 overflow-y-auto">
-          {!isTabAllowed ? (
+          {!isKnownTab ? (
+            <NotFoundView onGoHome={() => handleSelectTab(ROLE_CONFIGS[userRole]?.defaultTab || 'dashboard')} />
+          ) : !isTabAllowed ? (
             <AccessRestrictedGuardrail
               currentTab={currentTab}
               userRole={userRole}
@@ -264,13 +267,14 @@ export function App() {
                 }
               />
               <Route path="/finance" element={<InvoiceClearanceView />} />
+              <Route path="/rates" element={<RatesView />} />
               <Route path="/suppliers" element={<SuppliersView />} />
               <Route path="/audit" element={<AuditLogView />} />
               <Route path="/admin" element={<AdminView userRole={userRole} />} />
-              {/* Fallback to default */}
+              {/* Fallback to NotFound */}
               <Route
                 path="*"
-                element={<Navigate to={`/${ROLE_CONFIGS[userRole]?.defaultTab || 'dashboard'}`} replace />}
+                element={<NotFoundView onGoHome={() => handleSelectTab(ROLE_CONFIGS[userRole]?.defaultTab || 'dashboard')} />}
               />
             </Routes>
           )}

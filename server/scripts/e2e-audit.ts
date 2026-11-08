@@ -498,6 +498,94 @@ async function runAllTests() {
       }
     });
 
+    // ==========================================
+    // SUITE 6: 3-TIER ARCHITECTURE, SECURITY & DATA INTEGRITY REMEDIATION
+    // ==========================================
+    console.log('\n--- SUITE 6: 3-TIER ARCHITECTURE, SECURITY & DATA INTEGRITY ---');
+
+    await recordTest('Security', 'Public /uploads static directory is disabled (404)', async () => {
+      const rootBase = baseUrl.replace('/api', '');
+      const res = await fetch(`${rootBase}/uploads/reports/nonexistent.pdf`);
+      if (res.status !== 404) {
+        throw new Error(`Expected 404 on /uploads, got ${res.status}`);
+      }
+    });
+
+    await recordTest('Security', 'Protected /api/reports/:id/file requires authentication (401)', async () => {
+      const res = await request(baseUrl, 'GET', `/reports/${reportId}/file`);
+      if (res.status !== 401) {
+        throw new Error(`Expected 401 on unauthenticated /reports/:id/file, got ${res.status}`);
+      }
+    });
+
+    await recordTest('RBAC', 'Clinic role is blocked from workforce directory, rates, and slot queues (403)', async () => {
+      const restrictedEndpoints = [
+        '/employees/search?q=E102',
+        '/masters/rates',
+        '/slots/queue',
+        '/slots/price-comparison',
+        '/clearance/workforce'
+      ];
+      for (const ep of restrictedEndpoints) {
+        const res = await request(baseUrl, 'GET', ep, { token: tokens.badr });
+        if (res.status !== 403) {
+          throw new Error(`Expected 403 for CLINIC on ${ep}, got ${res.status}`);
+        }
+      }
+    });
+
+    await recordTest('Data Tier', 'System settings persist in Neon PostgreSQL SystemSetting table', async () => {
+      const getRes = await request(baseUrl, 'GET', '/admin/settings', { token: tokens.admin });
+      if (getRes.status !== 200 || !getRes.data.settings) {
+        throw new Error(`Failed to get settings: ${getRes.status}`);
+      }
+      const dbRow = await prisma.systemSetting.findUnique({ where: { id: 'SYSTEM_DEFAULT' } });
+      if (!dbRow) {
+        throw new Error('SystemSetting SYSTEM_DEFAULT row was not persisted in PostgreSQL');
+      }
+    });
+
+    await recordTest('Data Tier', 'Structured labData and validityTerm persist on MedicalReport', async () => {
+      const res = await request(baseUrl, 'POST', '/reports', {
+        token: tokens.badr,
+        body: {
+          requestId: createdRequestId,
+          result: 'FIT',
+          testDate: '2026-11-15',
+          doctorName: 'Dr. Tariq Al-Ghamdi, MD',
+          remarks: JSON.stringify({
+            notes: 'Structured lab verification',
+            validityTerm: '2 Years (Petro)',
+            labData: { cbc: { glucose: '92 mg/dL', hemoglobin: '15.1 g/dL' } }
+          })
+        }
+      });
+      if (res.status !== 201) {
+        throw new Error(`Failed to update report with structured labData: ${res.status}`);
+      }
+      const dbReport = await prisma.medicalReport.findUnique({ where: { id: reportId } });
+      if (!dbReport?.labData || dbReport.validityTerm !== '2 Years (Petro)') {
+        throw new Error(`Expected labData and validityTerm in DB, got: ${JSON.stringify(dbReport)}`);
+      }
+    });
+
+    await recordTest('Data Tier', 'Dashboard metrics aggregate real invoice sum and live clientVolume', async () => {
+      const res = await request(baseUrl, 'GET', '/dashboard/metrics', { token: tokens.hr });
+      if (res.status !== 200 || !res.data.kpis) {
+        throw new Error(`Failed to fetch dashboard metrics: ${res.status}`);
+      }
+      const agg = await prisma.invoice.aggregate({
+        where: { status: 'SUBMITTED' },
+        _sum: { totalAmount: true }
+      });
+      const expectedSAR = agg._sum.totalAmount != null
+        ? `SAR ${Number(agg._sum.totalAmount).toFixed(2)}`
+        : 'SAR 0.00';
+      if (res.data.kpis.pendingInvoices.subtotalSAR !== expectedSAR) {
+        throw new Error(`Expected ${expectedSAR} from live DB aggregation, got ${res.data.kpis.pendingInvoices.subtotalSAR}`);
+      }
+    });
+
     // Clean up created test record
     if (createdRequestId) {
       try {

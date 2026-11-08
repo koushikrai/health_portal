@@ -1,4 +1,5 @@
-import prisma from '../prisma';
+import { InvoiceRepository } from '../repositories/invoiceRepository';
+import { MasterRepository } from '../repositories/masterRepository';
 
 export interface AuditLineItem {
   requestId: string;
@@ -14,34 +15,14 @@ export interface AuditLineItem {
 
 export class InvoiceService {
   static async auditInvoice(invoiceId: string) {
-    const invoice = await prisma.invoice.findUnique({
-      where: { id: invoiceId },
-      include: {
-        vendor: true,
-        lineItems: {
-          include: {
-            request: {
-              include: {
-                employee: true,
-                test: true,
-                report: true
-              }
-            }
-          }
-        }
-      }
-    });
+    const invoice = await InvoiceRepository.findById(invoiceId);
 
     if (!invoice) {
       throw new Error(`Invoice not found: ${invoiceId}`);
     }
 
-    // Fetch active contract rates for this clinic
-    const contract = await prisma.contract.findFirst({
-      where: { vendorId: invoice.vendorId },
-      include: { rates: true },
-      orderBy: { createdAt: 'desc' }
-    });
+    // Fetch active contract rates for this clinic via Data Tier
+    const contract = await MasterRepository.findLatestContractByVendor(invoice.vendorId);
 
     const rateMap: Record<string, number> = {};
     if (contract) {

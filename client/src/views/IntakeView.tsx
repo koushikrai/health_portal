@@ -2,9 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { api } from '../api/client';
 import { PdfReportViewerModal } from '../components/certificate/PdfReportViewerModal';
+import { SlotAssignmentModal } from '../components/slots/SlotAssignmentModal';
 
 export const IntakeView: React.FC = () => {
   const [mode, setMode] = useState<'single' | 'bulk' | 'batches' | 'prebook'>('single');
+
+  // Slot Assignment Modal State for Pre-Booked Quotas
+  const [assigningSlotId, setAssigningSlotId] = useState<string | null>(null);
 
   // Bulk Upload Batches Tracking State
   const [batches, setBatches] = useState<any[]>([]);
@@ -15,6 +19,7 @@ export const IntakeView: React.FC = () => {
 
   // Pre-Book Capacity Slots State (When employees are not decided yet - e.g. 50 slots)
   const [preBookSlots, setPreBookSlots] = useState<number>(50);
+  const [preBookTestId, setPreBookTestId] = useState('5004955');
   const [preBookTitle, setPreBookTitle] = useState('Sadara Medical');
   const [preBookDept, setPreBookDept] = useState('PMTA');
   const [preBookPlant, setPreBookPlant] = useState('Sadara Complex (Jubail)');
@@ -55,7 +60,6 @@ export const IntakeView: React.FC = () => {
 
   useEffect(() => {
     loadTests();
-    handleSelectBySAP('11000016');
   }, []);
 
   const loadPreBookReservations = async () => {
@@ -81,8 +85,10 @@ export const IntakeView: React.FC = () => {
 
     try {
       setPreBookSubmitting(true);
+      const matchedTest = tests.find(t => t.id === preBookTestId);
       const res = await api.createSlotRequest({
-        title: preBookTitle,
+        title: matchedTest ? matchedTest.name : preBookTitle,
+        testId: preBookTestId,
         department: preBookDept,
         plant: preBookPlant,
         requestedSlots: preBookSlots,
@@ -132,6 +138,8 @@ export const IntakeView: React.FC = () => {
       setTests(res.data.tests);
       if (res.data.tests.length > 0) {
         setSelectedTestId(res.data.tests[0].id);
+        setPreBookTestId(res.data.tests[0].id);
+        setPreBookTitle(res.data.tests[0].name);
       }
     } catch (e) {
       console.error(e);
@@ -161,9 +169,9 @@ export const IntakeView: React.FC = () => {
 
   const handleSelectBySAP = async (sapId: string) => {
     try {
-      const res = await api.searchEmployees(sapId);
-      if (res.data.employees && res.data.employees.length > 0) {
-        handleSelectEmployee(res.data.employees[0]);
+      const res = await api.getEmployee(sapId);
+      if (res.data?.employee) {
+        handleSelectEmployee(res.data.employee);
       }
     } catch (e) {
       console.error(e);
@@ -452,17 +460,6 @@ export const IntakeView: React.FC = () => {
     await validateParsedRows(rowObjects);
   };
 
-  const handleLoadSampleBulk = () => {
-    const sample = `11000016\t5004955\t2026-11-20\tSadara Turnaround
-11000012\t5004959\t2026-11-15\tSABIC Gate Pass
-11000017\t5004964\t2026-11-25\tPetroKemya Site
-11000008\t5004959\t2026-11-10\tSulaiman Active`;
-    setBulkText(sample);
-    setUploadedFileName('Sample_ECC_Roster.xlsx');
-    setUploadedFileSize('4 sample records');
-    setUploadError('');
-  };
-
   const handleSubmitBulk = async () => {
     const validRows = bulkRows.filter(r => r.status === 'READY' || r.status === 'DUPLICATE_WARN');
     if (validRows.length === 0) {
@@ -507,9 +504,6 @@ export const IntakeView: React.FC = () => {
           <h2 className="font-display font-extrabold text-2xl text-slate-900 mt-0.5">
             New Clearance Request &amp; Pre-Booking
           </h2>
-          <p className="text-xs text-slate-500">
-            Submit single employee gate pass clearance, batch-upload roster from Excel, or pre-book slots for unassigned workforce.
-          </p>
         </div>
 
         {/* Mode Switcher Pill */}
@@ -546,7 +540,7 @@ export const IntakeView: React.FC = () => {
             }}
             className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
               mode === 'prebook'
-                ? 'bg-emerald-700 text-white shadow-sm'
+                ? 'bg-secondary text-white shadow-sm'
                 : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200/60'
             }`}
           >
@@ -594,24 +588,18 @@ export const IntakeView: React.FC = () => {
       {/* Mode 1: Single Request View */}
       {mode === 'single' && (
         <div className="space-y-4">
-          {/* Quick Pre-Book Shortcut Banner for HR Planning */}
-          <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 border border-emerald-200/80 text-emerald-950 text-xs flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <span className="material-symbols-outlined text-emerald-700 text-[20px]">calendar_add_on</span>
-              <span>
-                <strong>Need to reserve clinic capacity before worker names are decided?</strong> Pre-book slot quota (e.g. 50 turnaround slots) for Central Team clinic allocation.
-              </span>
-            </div>
+          {/* Quick Pre-Book Shortcut for HR Planning */}
+          <div className="flex justify-end">
             <button
               type="button"
               onClick={() => {
                 setMode('prebook');
                 loadPreBookReservations();
               }}
-              className="px-3 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs shrink-0"
+              className="px-3.5 py-1.5 bg-secondary hover:bg-secondary-hover text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
             >
+              <span className="material-symbols-outlined text-[16px]">calendar_add_on</span>
               <span>+ Pre-Book Headcount Slots</span>
-              <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
             </button>
           </div>
 
@@ -624,23 +612,6 @@ export const IntakeView: React.FC = () => {
                   <span className="material-symbols-outlined text-secondary text-[20px]">badge</span>
                   <span>Employee Identification</span>
                 </h3>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => handleSelectBySAP('11000016')}
-                    className="text-[10.5px] px-2 py-0.5 rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 font-bold text-slate-600"
-                  >
-                    Dasan
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectBySAP('11000008')}
-                    className="text-[10.5px] px-2 py-0.5 rounded border border-amber-200 bg-amber-50 hover:bg-amber-100 font-bold text-amber-800"
-                    title="Triggers duplicate warning"
-                  >
-                    Sulaiman
-                  </button>
-                </div>
               </div>
 
               {/* Autocomplete Search Bar */}
@@ -707,17 +678,17 @@ export const IntakeView: React.FC = () => {
 
                     <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
                       <span className="text-[10px] text-slate-400 uppercase font-semibold block">Saudi Iqama</span>
-                      <span className="font-mono font-bold text-slate-800">{selectedEmployee.iqamaId || '2239993609'}</span>
+                      <span className="font-mono font-bold text-slate-800">{selectedEmployee.iqamaId || '—'}</span>
                     </div>
 
                     <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
                       <span className="text-[10px] text-slate-400 uppercase font-semibold block">Division</span>
-                      <span className="font-medium text-slate-800 truncate block">{selectedEmployee.division}</span>
+                      <span className="font-medium text-slate-800 truncate block">{selectedEmployee.division || '—'}</span>
                     </div>
 
                     <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
                       <span className="text-[10px] text-slate-400 uppercase font-semibold block">Cost Center</span>
-                      <span className="font-mono font-bold text-slate-800">{selectedEmployee.costCenter || '0010000402'}</span>
+                      <span className="font-mono font-bold text-slate-800">{selectedEmployee.costCenter || '—'}</span>
                     </div>
                   </div>
 
@@ -841,11 +812,7 @@ export const IntakeView: React.FC = () => {
               </div>
 
               {/* Submit Action */}
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-[11px] text-slate-400">
-                  Sends request to Central Team for hospital slot quota allocation
-                </span>
-
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-end">
                 <button
                   type="submit"
                   disabled={submitting || !selectedEmployee}
@@ -878,9 +845,6 @@ export const IntakeView: React.FC = () => {
                   <span className="material-symbols-outlined text-emerald-600 text-[22px]">table_chart</span>
                   <span>Bulk Request Intake (Excel Roster / CSV)</span>
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Upload an Excel spreadsheet (.xlsx, .xls) or paste roster rows. System validates SAP IDs, test codes, and certificate eligibility automatically.
-                </p>
               </div>
 
               {/* Action Buttons */}
@@ -898,19 +862,11 @@ export const IntakeView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+                  className="text-xs font-bold text-white bg-primary hover:bg-primary-light px-4 py-2 rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
                   title="Upload .xlsx or .xls file directly"
                 >
                   <span className="material-symbols-outlined text-[17px]">upload_file</span>
                   <span>Upload Excel Sheet</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleLoadSampleBulk}
-                  className="text-xs font-bold text-secondary bg-orange-50 hover:bg-orange-100 px-3 py-2 rounded-xl border border-orange-200 cursor-pointer"
-                >
-                  Load Sample Rows
                 </button>
               </div>
             </div>
@@ -1085,7 +1041,7 @@ export const IntakeView: React.FC = () => {
                           e.stopPropagation();
                           fileInputRef.current?.click();
                         }}
-                        className="inline-flex items-center gap-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl shadow-sm transition-all cursor-pointer"
+                        className="inline-flex items-center gap-1.5 text-xs font-bold bg-primary hover:bg-primary-light text-white px-4 py-2 rounded-xl shadow-sm transition-all cursor-pointer"
                       >
                         <span className="material-symbols-outlined text-[17px]">folder_open</span>
                         <span>Browse Excel Files</span>
@@ -1255,9 +1211,6 @@ export const IntakeView: React.FC = () => {
                   Pre-Book Capacity Slots (When Employees Are Not Decided Yet)
                 </h3>
               </div>
-              <p className="text-xs text-slate-500 mt-1 max-w-2xl">
-                Pre-book screening slots for a target headcount (e.g. 50 workers) before specific employee names or Iqama IDs are finalized. The Central Medical Team will receive your request and assign clinic quotas across accredited medical centers.
-              </p>
             </div>
 
             <form onSubmit={handlePreBookSubmit} className="space-y-4 pt-2 border-t border-slate-100">
@@ -1272,7 +1225,7 @@ export const IntakeView: React.FC = () => {
                     max="500"
                     value={preBookSlots}
                     onChange={(e) => setPreBookSlots(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-900 focus:outline-none focus:border-secondary focus:bg-white"
                   />
                   <span className="text-[10px] text-slate-400 mt-1 block">e.g. 50 workers for upcoming turnaround</span>
                 </div>
@@ -1282,16 +1235,27 @@ export const IntakeView: React.FC = () => {
                     Test Protocol / Medical Exam *
                   </label>
                   <select
-                    value={preBookTitle}
-                    onChange={(e) => setPreBookTitle(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                    value={preBookTestId}
+                    onChange={(e) => {
+                      const tid = e.target.value;
+                      setPreBookTestId(tid);
+                      const found = tests.find(t => t.id === tid);
+                      if (found) setPreBookTitle(found.name);
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary focus:bg-white"
                   >
-                    <option value="Sadara Medical">Sadara Medical (Annual Comprehensive)</option>
-                    <option value="SABIC Medical Screening">SABIC Medical Screening with TSH</option>
-                    <option value="Yanpet medical test">Yanpet petrochemical periodic test</option>
-                    <option value="Ma'aden medical test (PSA above 40)">Ma&apos;aden medical test</option>
-                    <option value="General medical fitness">General medical fitness</option>
+                    {tests.map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.id} — {t.name} ({t.validityMonths > 0 ? `${t.validityMonths} Months Validity` : 'One-off/swab'})
+                      </option>
+                    ))}
                   </select>
+                  {tests.find(t => t.id === preBookTestId) && (
+                    <div className="mt-1 text-[11px] text-slate-400 flex items-center justify-between">
+                      <span>SAP Material Code: <strong className="text-slate-600 font-mono">{preBookTestId}</strong></span>
+                      <span>Accredited Clinics: <strong className="text-slate-600">{tests.find(t => t.id === preBookTestId)?.ratedClinics || 'BAK, GAMC'}</strong></span>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -1301,7 +1265,7 @@ export const IntakeView: React.FC = () => {
                   <select
                     value={preBookDept}
                     onChange={(e) => setPreBookDept(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary focus:bg-white"
                   >
                     <option value="PMTA">PMTA</option>
                     <option value="CIVIL">CIVIL</option>
@@ -1324,7 +1288,7 @@ export const IntakeView: React.FC = () => {
                     value={preBookPlant}
                     onChange={(e) => setPreBookPlant(e.target.value)}
                     placeholder="e.g. Sadara Complex (Jubail) or Yanpet Petrochemical"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-secondary focus:bg-white"
                   />
                 </div>
 
@@ -1336,7 +1300,7 @@ export const IntakeView: React.FC = () => {
                     type="date"
                     value={preBookNeedBy}
                     onChange={(e) => setPreBookNeedBy(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-secondary focus:bg-white"
                   />
                 </div>
               </div>
@@ -1350,7 +1314,7 @@ export const IntakeView: React.FC = () => {
                   value={preBookNote}
                   onChange={(e) => setPreBookNote(e.target.value)}
                   placeholder="e.g. Turnaround crew mobilization; final Iqama numbers will be provided once contractor gate pass list is confirmed."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 focus:outline-none focus:border-secondary focus:bg-white"
                 ></textarea>
               </div>
 
@@ -1362,7 +1326,7 @@ export const IntakeView: React.FC = () => {
                 <button
                   type="submit"
                   disabled={preBookSubmitting}
-                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs px-6 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  className="bg-secondary hover:bg-secondary-hover text-white font-bold text-xs px-6 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   <span className="material-symbols-outlined text-[16px]">send</span>
                   <span>{preBookSubmitting ? 'Submitting Reservation...' : `Submit ${preBookSlots}-Slot Request to Central Team`}</span>
@@ -1378,9 +1342,6 @@ export const IntakeView: React.FC = () => {
                 <h4 className="font-display font-bold text-base text-slate-900">
                   Active Pre-Booked Reservations &amp; Status ({preBookList.length})
                 </h4>
-                <p className="text-xs text-slate-500">
-                  Track slot quotas requested by HR and clinic distribution confirmed by Central Medical Team.
-                </p>
               </div>
 
               <button
@@ -1407,14 +1368,19 @@ export const IntakeView: React.FC = () => {
                       <th className="py-2.5 px-3">Protocol &amp; Dept</th>
                       <th className="py-2.5 px-3">Facility</th>
                       <th className="py-2.5 px-3">Slots Quota</th>
+                      <th className="py-2.5 px-3">Workforce Assigned</th>
                       <th className="py-2.5 px-3">Central Team Status</th>
-                      <th className="py-2.5 px-3">Clinic Breakdown (Assigned by Central)</th>
+                      <th className="py-2.5 px-3">Clinic Breakdown</th>
+                      <th className="py-2.5 px-3 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {preBookList.map((item) => {
                       const totalAlloc = item.allocatedSlots || 0;
                       const isFull = totalAlloc >= item.requestedSlots;
+                      const assigned = item.assignedSlots || 0;
+                      const remaining = item.remainingSlots ?? Math.max(0, item.requestedSlots - assigned);
+                      const percent = Math.min(100, Math.round((assigned / item.requestedSlots) * 100));
 
                       return (
                         <tr key={item.id} className="hover:bg-slate-50">
@@ -1428,6 +1394,24 @@ export const IntakeView: React.FC = () => {
                           <td className="py-2.5 px-3 text-slate-600">{item.plant || 'Standard'}</td>
                           <td className="py-2.5 px-3 font-mono font-extrabold text-slate-900">
                             {item.requestedSlots} slots
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="w-36">
+                              <div className="flex items-center justify-between text-[11px] font-bold text-slate-800 mb-1">
+                                <span>{assigned} / {item.requestedSlots}</span>
+                                <span className={remaining === 0 ? 'text-emerald-700' : 'text-orange-600 font-semibold'}>
+                                  {remaining === 0 ? 'Full' : `${remaining} left`}
+                                </span>
+                              </div>
+                              <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full transition-all duration-300 rounded-full ${
+                                    remaining === 0 ? 'bg-emerald-600' : 'bg-orange-500'
+                                  }`}
+                                  style={{ width: `${percent}%` }}
+                                ></div>
+                              </div>
+                            </div>
                           </td>
                           <td className="py-2.5 px-3">
                             {isFull ? (
@@ -1453,12 +1437,26 @@ export const IntakeView: React.FC = () => {
                                     className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 text-[10.5px] font-semibold"
                                   >
                                     {a.vendorName}: <strong className="text-emerald-800">{a.allocatedSlots}</strong>
+                                    {a.assignedSlots > 0 && (
+                                      <span className="text-[10px] text-orange-600 ml-1">({a.assignedSlots} assigned)</span>
+                                    )}
                                   </span>
                                 ))}
                               </div>
                             ) : (
                               <span className="text-slate-400 italic text-[11px]">Pending Central clinic triage</span>
                             )}
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => setAssigningSlotId(item.id)}
+                              className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 ml-auto cursor-pointer"
+                              title="Assign employees (one by one or bulk) to this slot quota"
+                            >
+                              <span className="material-symbols-outlined text-[15px]">group_add</span>
+                              <span>Assign Employees</span>
+                            </button>
                           </td>
                         </tr>
                       );
@@ -1480,9 +1478,6 @@ export const IntakeView: React.FC = () => {
                 <h3 className="font-display font-extrabold text-lg text-slate-900">
                   Bulk Uploaded Employee Batches Tracking
                 </h3>
-                <p className="text-xs text-slate-500">
-                  View roster batches, monitor completion status, and review medical clearance certificates.
-                </p>
               </div>
 
               <button
@@ -1584,23 +1579,27 @@ export const IntakeView: React.FC = () => {
                                     )}
                                   </td>
                                   <td className="py-2 px-3 text-right">
-                                    <button
-                                      type="button"
-                                      onClick={() => setSelectedPdfReport({
-                                        id: emp.reportId || 'REP-MOCK',
-                                        employeeName: emp.name,
-                                        iqamaNumber: emp.iqamaId || '2239993609',
-                                        reportName: `Medical Clearance - ${batch.protocolType}`,
-                                        issueDate: '2026-11-01',
-                                        expiryDate: '2028-11-01',
-                                        medicalCenterName: emp.assignedClinicName || 'Accredited Medical Center',
-                                        pdfUrl: emp.pdfFileUrl || null
-                                      })}
-                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10.5px] cursor-pointer"
-                                    >
-                                      <span className="material-symbols-outlined text-[13px]">picture_as_pdf</span>
-                                      <span>View Medical Report</span>
-                                    </button>
+                                    {emp.reportId || emp.pdfFileUrl ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedPdfReport({
+                                          id: emp.reportId,
+                                          employeeName: emp.name,
+                                          iqamaNumber: emp.iqamaId || emp.empNo,
+                                          reportName: `Medical Clearance - ${batch.protocolType}`,
+                                          issueDate: 'Active',
+                                          expiryDate: 'Valid',
+                                          medicalCenterName: emp.assignedClinicName || 'Accredited Medical Center',
+                                          pdfUrl: emp.pdfFileUrl || null
+                                        })}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10.5px] cursor-pointer"
+                                      >
+                                        <span className="material-symbols-outlined text-[13px]">picture_as_pdf</span>
+                                        <span>View Medical Report</span>
+                                      </button>
+                                    ) : (
+                                      <span className="text-[11px] text-slate-400 italic">Report Pending</span>
+                                    )}
                                   </td>
                                 </tr>
                               ))}
@@ -1622,6 +1621,16 @@ export const IntakeView: React.FC = () => {
         report={selectedPdfReport}
         onClose={() => setSelectedPdfReport(null)}
       />
+
+      {/* Pre-Booked Slot Workforce Assignment Modal */}
+      {assigningSlotId && (
+        <SlotAssignmentModal
+          slotId={assigningSlotId}
+          isOpen={!!assigningSlotId}
+          onClose={() => setAssigningSlotId(null)}
+          onAssignmentUpdated={loadPreBookReservations}
+        />
+      )}
     </div>
   );
 };

@@ -17,6 +17,9 @@ interface BatchEmployee {
   testName?: string;
   cardStatus: string;
   priority?: boolean;
+  daysToExpiry?: number | null;
+  expiresAt?: string | null;
+  status: string; // 'WAITING' | 'SUBMITTED' | 'SCHEDULED' | 'COMPLETED' | 'CANCELLED' | 'REJECTED'
   assignedClinicId?: string | null;
   assignedClinicCode?: string | null;
   assignedClinicName?: string | null;
@@ -46,12 +49,59 @@ interface ClearanceBatch {
   employees: BatchEmployee[];
 }
 
-export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
+interface SparklineProps {
+  color: string;
+  gradientId: string;
+  linePath: string;
+  areaPath: string;
+  endX: number;
+  endY: number;
+}
+
+const Sparkline: React.FC<SparklineProps> = ({
+  color,
+  gradientId,
+  linePath,
+  areaPath,
+  endX,
+  endY,
+}) => (
+  <div className="w-20 sm:w-24 h-8 shrink-0">
+    <svg className="w-full h-full overflow-visible" viewBox="0 0 100 36" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.0" />
+        </linearGradient>
+      </defs>
+      <path d={areaPath} fill={`url(#${gradientId})`} />
+      <path
+        d={linePath}
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx={endX} cy={endY} r="2.5" fill={color} />
+      <circle cx={endX} cy={endY} r="5" fill={color} fillOpacity="0.25" className="animate-pulse" />
+    </svg>
+  </div>
+);
+
+export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole = 'HR' }) => {
   // Navigation & Filter State
   const [selectedPlant, setSelectedPlant] = useState<'ALL' | 'YANPET' | 'SABIC' | 'SADARA'>('ALL');
   const [selectedBatchId, setSelectedBatchId] = useState<string>('REQ-2026-0104');
   const [batchSearch, setBatchSearch] = useState<string>('');
-  const [quickSort, setQuickSort] = useState<'EXPIRING_FIRST' | 'DEPARTMENT' | 'DEFAULT'>('EXPIRING_FIRST');
+
+  // Table Filter & Sorting State
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'UNASSIGNED' | 'ASSIGNED' | 'EXPIRING' | 'WAITING' | 'SUBMITTED' | 'CANCELLED'>('ALL');
+  const [clinicFilter, setClinicFilter] = useState<string>('ALL');
+  const [employeeSearch, setEmployeeSearch] = useState<string>('');
+  type SortField = 'UNASSIGNED_FIRST' | 'EXPIRING_FIRST' | 'CLINIC' | 'DEPARTMENT' | 'EMP_NO' | 'NAME';
+  const [sortField, setSortField] = useState<SortField>('UNASSIGNED_FIRST');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   // Allocation & Dispatch Controls
   const [assignCount, setAssignCount] = useState<number>(30);
@@ -79,6 +129,13 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffNo, setNewStaffNo] = useState('');
   const [newStaffDept, setNewStaffDept] = useState('LOGISTIC');
+
+  // New batch input state
+  const [newBatchTitle, setNewBatchTitle] = useState('Yanpet Turnaround Q4 Intake');
+  const [newBatchPlant, setNewBatchPlant] = useState<'YANPET' | 'SABIC' | 'SADARA' | 'OTHER'>('YANPET');
+  const [newBatchTestId, setNewBatchTestId] = useState('5004972');
+  const [newBatchEmpNo, setNewBatchEmpNo] = useState('11000018');
+  const [newBatchEmpName, setNewBatchEmpName] = useState('Lead Turnaround Technician');
 
   // Load database data
   useEffect(() => {
@@ -166,8 +223,14 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
       if (r.note) {
         try { meta = typeof r.note === 'string' ? JSON.parse(r.note) : r.note; } catch (_) {}
       }
-      if (meta?.batchId && !knownIds.has(meta.batchId)) {
+      if (meta?.slotRequestId && !knownIds.has(meta.slotRequestId)) {
+        bId = meta.slotRequestId;
+      } else if (meta?.batchId && !knownIds.has(meta.batchId)) {
         bId = meta.batchId;
+      } else if (r.id.startsWith('SR-')) {
+        const parts = r.id.split('-');
+        const autoId = parts.slice(0, 2).join('-');
+        if (!knownIds.has(autoId)) bId = autoId;
       } else if (r.id.startsWith('BULK-')) {
         const parts = r.id.split('-');
         const autoId = parts.slice(0, 3).join('-');
@@ -175,14 +238,21 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
       }
       if (bId && !knownIds.has(bId)) {
         knownIds.add(bId);
+        const isSlotBatch = bId.startsWith('SR-') || Boolean(meta?.slotRequestId);
+        const plantStr = meta?.plant || r.department || (isSlotBatch ? 'Sadara Complex (Jubail)' : 'ECC Main Facility');
+        let plantCategory: 'YANPET' | 'SABIC' | 'SADARA' | 'OTHER' = 'OTHER';
+        if (/yanpet/i.test(plantStr)) plantCategory = 'YANPET';
+        else if (/sabic/i.test(plantStr)) plantCategory = 'SABIC';
+        else if (/sadara/i.test(plantStr)) plantCategory = 'SADARA';
+
         dynamicConfigs.push({
           id: bId,
-          title: meta?.batchName || `Bulk Batch ${bId}`,
-          plant: meta?.plant || r.department || 'ECC Main Facility',
-          plantCategory: 'OTHER' as const,
+          title: meta?.slotTitle || meta?.batchName || (isSlotBatch ? `Pre-Booked Slot Batch ${bId}` : `Bulk Batch ${bId}`),
+          plant: plantStr,
+          plantCategory,
           requestedDate: r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Today',
-          protocolType: meta?.fileName ? `Upload: ${meta.fileName}` : 'Bulk Roster Intake',
-          subStatus: 'Batch Intake',
+          protocolType: meta?.slotTitle || (meta?.fileName ? `Upload: ${meta.fileName}` : (isSlotBatch ? (r.test?.name || 'Pre-Booked Quota Clearance') : 'Bulk Roster Intake')),
+          subStatus: isSlotBatch ? 'Pre-Booked Quota' : 'Batch Intake',
           isOverdue: false
         });
       }
@@ -199,7 +269,9 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
           } catch (_) {}
         }
         const emp = r.employee || {};
-        const isExpiring = meta.priority || (idx === 8 && defaultBatchId === 'REQ-2026-0104');
+        const expiresAtDate = r.report?.expiresAt ? new Date(r.report.expiresAt) : null;
+        const daysToExpiry = expiresAtDate ? Math.ceil((expiresAtDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : null;
+        const isExpiring = Boolean(meta.priority || (daysToExpiry !== null && daysToExpiry <= 60));
         const hasPdf = Boolean(r.report?.fileUrl);
         const isCertified = Boolean(r.status === 'COMPLETED' && r.report?.id && r.report?.result);
         const isDone = isCertified;
@@ -213,9 +285,12 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
           dept: r.department || emp.department || 'LOGISTIC',
           testName: r.test?.name || 'Occupational Medical Test',
           cardStatus: isExpiring
-            ? 'Expiring ≤60d • 21 Nov 2026'
+            ? `Expiring ≤60d${expiresAtDate ? ` • ${expiresAtDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}`
             : (r.vendor ? r.vendor.name : (r.vendorId ? 'Assigned' : 'No card')),
           priority: Boolean(isExpiring),
+          daysToExpiry,
+          expiresAt: r.report?.expiresAt || null,
+          status: r.status || 'WAITING',
           assignedClinicId: r.vendorId || null,
           assignedClinicCode: r.vendor?.code || null,
           assignedClinicName: r.vendor?.name || null,
@@ -233,7 +308,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
     return allConfigs.map(cfg => {
       const bReqs = requests.filter(r => r.id.startsWith(cfg.id) || (r.note && typeof r.note === 'string' && r.note.includes(cfg.id)));
       const employees = mapEmployees(bReqs, cfg.id);
-      const assignedCount = employees.filter(e => e.assignedClinicId).length;
+      const assignedCount = employees.filter(e => Boolean(e.assignedClinicId || e.assignedClinicCode)).length;
       const totalEmployees = employees.length;
       const unassignedCount = totalEmployees - assignedCount;
       const doneCount = employees.filter(e => e.isCertified).length;
@@ -263,7 +338,16 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
     const bulkIds = new Set(batches.flatMap(b => b.employees.map(e => e.id)));
     const singles = requests.filter(r => !bulkIds.has(r.id));
     return singles.map((r, idx) => {
+      let meta: any = {};
+      if (r.note) {
+        try {
+          meta = typeof r.note === 'string' ? JSON.parse(r.note) : r.note;
+        } catch (_) {}
+      }
       const emp = r.employee || {};
+      const expiresAtDate = r.report?.expiresAt ? new Date(r.report.expiresAt) : null;
+      const daysToExpiry = expiresAtDate ? Math.ceil((expiresAtDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : null;
+      const isExpiring = Boolean(meta.priority || (daysToExpiry !== null && daysToExpiry <= 60));
       const hasPdf = Boolean(r.report?.fileUrl);
       const isCertified = Boolean(r.status === 'COMPLETED' && r.report?.id && r.report?.result);
       const isDone = isCertified;
@@ -275,8 +359,13 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
         iqamaId: emp.iqamaId,
         dept: r.department || emp.department || 'LOGISTIC',
         testName: r.test?.name || 'Occupational Medical Test',
-        cardStatus: r.vendor ? r.vendor.name : (r.vendorId ? 'Assigned' : 'No card'),
-        priority: false,
+        cardStatus: isExpiring
+          ? `Expiring ≤60d${expiresAtDate ? ` • ${expiresAtDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}`
+          : (r.vendor ? r.vendor.name : (r.vendorId ? 'Assigned' : 'No card')),
+        priority: Boolean(isExpiring),
+        daysToExpiry,
+        expiresAt: r.report?.expiresAt || null,
+        status: r.status || 'WAITING',
         assignedClinicId: r.vendorId || null,
         assignedClinicCode: r.vendor?.code || null,
         assignedClinicName: r.vendor?.name || null,
@@ -292,14 +381,27 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
   }, [requests, batches]);
 
   const filteredSingleRequests = useMemo(() => {
-    if (!singleSearch.trim()) return singleRequests;
-    const q = singleSearch.toLowerCase().trim();
-    return singleRequests.filter(s =>
-      s.name.toLowerCase().includes(q) ||
-      s.empNo.toLowerCase().includes(q) ||
-      (s.iqamaId && s.iqamaId.includes(q)) ||
-      s.dept.toLowerCase().includes(q)
-    );
+    let list = singleRequests;
+    if (singleSearch.trim()) {
+      const q = singleSearch.toLowerCase().trim();
+      list = singleRequests.filter(s =>
+        s.name.toLowerCase().includes(q) ||
+        s.empNo.toLowerCase().includes(q) ||
+        (s.iqamaId && s.iqamaId.includes(q)) ||
+        s.dept.toLowerCase().includes(q)
+      );
+    }
+    return [...list].sort((a, b) => {
+      const aAssigned = Boolean(a.assignedClinicId || a.assignedClinicCode);
+      const bAssigned = Boolean(b.assignedClinicId || b.assignedClinicCode);
+      if (!aAssigned && bAssigned) return -1;
+      if (aAssigned && !bAssigned) return 1;
+
+      if (a.priority && !b.priority) return -1;
+      if (!a.priority && b.priority) return 1;
+
+      return (a.empNo || '').localeCompare(b.empNo || '');
+    });
   }, [singleRequests, singleSearch]);
 
   // Filter Batches by Plant Selector and Search
@@ -326,36 +428,216 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
   // Update assignCount when active batch changes
   useEffect(() => {
     if (activeBatch) {
-      setAssignCount(activeBatch.unassignedCount || activeBatch.totalEmployees);
+      setAssignCount(activeBatch.unassignedCount ?? 0);
       setCurrentPage(1);
     }
   }, [activeBatch.id]);
 
-  // Sorted and Paginated Employees for Active Batch
-  const processedEmployees = useMemo(() => {
-    let list = [...activeBatch.employees];
-    if (quickSort === 'EXPIRING_FIRST') {
-      list.sort((a, b) => {
-        if (a.priority && !b.priority) return -1;
-        if (!a.priority && b.priority) return 1;
-        return a.empNo.localeCompare(b.empNo);
-      });
-    } else if (quickSort === 'DEPARTMENT') {
-      list.sort((a, b) => a.dept.localeCompare(b.dept));
+  // Filter counts for active batch
+  const filterCounts = useMemo(() => {
+    const employees = activeBatch?.employees || [];
+    const total = employees.length;
+    const unassigned = employees.filter(e => !e.assignedClinicId && !e.assignedClinicCode && e.status !== 'CANCELLED').length;
+    const assigned = employees.filter(e => Boolean(e.assignedClinicId || e.assignedClinicCode) && e.status !== 'CANCELLED').length;
+    const waiting = employees.filter(e => e.status === 'WAITING').length;
+    const submitted = employees.filter(e => e.status === 'SUBMITTED').length;
+    const cancelled = employees.filter(e => e.status === 'CANCELLED').length;
+    const expiring = employees.filter(e =>
+      Boolean(
+        e.priority ||
+        (typeof e.daysToExpiry === 'number' && e.daysToExpiry <= 60) ||
+        (e.cardStatus && /expir/i.test(e.cardStatus))
+      ) && e.status !== 'CANCELLED'
+    ).length;
+
+    const clinicCounts: Record<string, number> = {};
+    clinicList.forEach(c => {
+      clinicCounts[c.id] = employees.filter(e =>
+        e.status !== 'CANCELLED' && (
+          e.assignedClinicId === c.id ||
+          e.assignedClinicCode === c.code ||
+          (e.assignedClinicName && e.assignedClinicName.toLowerCase().includes(c.name.toLowerCase()))
+        )
+      ).length;
+    });
+
+    return {
+      total,
+      unassigned,
+      assigned,
+      waiting,
+      submitted,
+      cancelled,
+      expiring,
+      clinicCounts
+    };
+  }, [activeBatch?.employees, clinicList]);
+
+  // Filter Reset Handler
+  const handleResetFilters = () => {
+    setStatusFilter('ALL');
+    setClinicFilter('ALL');
+    setEmployeeSearch('');
+    setSortField('UNASSIGNED_FIRST');
+    setSortOrder('asc');
+    setCurrentPage(1);
+  };
+
+  // Sort Toggle Handler
+  const handleSortChange = (field: SortField) => {
+    if (sortField === field) {
+      setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
     }
+    setCurrentPage(1);
+  };
+
+  // Filtered, Sorted and Paginated Employees for Active Batch
+  const processedEmployees = useMemo(() => {
+    let list = [...(activeBatch?.employees || [])];
+
+    // 1. Filter by Assignment & Request Status
+    if (statusFilter === 'UNASSIGNED') {
+      list = list.filter(e => !e.assignedClinicId && !e.assignedClinicCode && e.status !== 'CANCELLED');
+    } else if (statusFilter === 'ASSIGNED') {
+      list = list.filter(e => Boolean(e.assignedClinicId || e.assignedClinicCode) && e.status !== 'CANCELLED');
+    } else if (statusFilter === 'WAITING') {
+      list = list.filter(e => e.status === 'WAITING');
+    } else if (statusFilter === 'SUBMITTED') {
+      list = list.filter(e => e.status === 'SUBMITTED');
+    } else if (statusFilter === 'CANCELLED') {
+      list = list.filter(e => e.status === 'CANCELLED');
+    } else if (statusFilter === 'EXPIRING') {
+      list = list.filter(e =>
+        Boolean(
+          e.priority ||
+          (typeof e.daysToExpiry === 'number' && e.daysToExpiry <= 60) ||
+          (e.cardStatus && /expir/i.test(e.cardStatus))
+        ) && e.status !== 'CANCELLED'
+      );
+    }
+
+    // 2. Filter by Clinic
+    if (clinicFilter !== 'ALL') {
+      if (clinicFilter === 'UNASSIGNED') {
+        list = list.filter(e => !e.assignedClinicId && !e.assignedClinicCode);
+      } else {
+        list = list.filter(e =>
+          e.assignedClinicId === clinicFilter ||
+          e.assignedClinicCode === clinicFilter ||
+          (e.assignedClinicName && e.assignedClinicName.toLowerCase().includes(clinicFilter.toLowerCase()))
+        );
+      }
+    }
+
+    // 3. Search Filter
+    if (employeeSearch.trim()) {
+      const q = employeeSearch.toLowerCase().trim();
+      list = list.filter(e =>
+        (e.name && e.name.toLowerCase().includes(q)) ||
+        (e.empNo && e.empNo.toLowerCase().includes(q)) ||
+        (e.iqamaId && e.iqamaId.includes(q)) ||
+        (e.dept && e.dept.toLowerCase().includes(q)) ||
+        (e.assignedClinicName && e.assignedClinicName.toLowerCase().includes(q)) ||
+        (e.assignedClinicCode && e.assignedClinicCode.toLowerCase().includes(q)) ||
+        (e.cardStatus && e.cardStatus.toLowerCase().includes(q)) ||
+        (e.status && e.status.toLowerCase().includes(q))
+      );
+    }
+
+    // 4. Sorting
+    list.sort((a, b) => {
+      let comp = 0;
+
+      if (sortField === 'CLINIC') {
+        const aClinic = a.assignedClinicName || a.assignedClinicCode || (a.assignedClinicId ? 'Assigned' : 'ZZZ_Unassigned');
+        const bClinic = b.assignedClinicName || b.assignedClinicCode || (b.assignedClinicId ? 'Assigned' : 'ZZZ_Unassigned');
+        comp = aClinic.localeCompare(bClinic);
+        if (comp === 0) {
+          comp = (a.empNo || '').localeCompare(b.empNo || '');
+        }
+      } else if (sortField === 'DEPARTMENT') {
+        comp = (a.dept || '').localeCompare(b.dept || '');
+        if (comp === 0) {
+          const aAssigned = Boolean(a.assignedClinicId || a.assignedClinicCode);
+          const bAssigned = Boolean(b.assignedClinicId || b.assignedClinicCode);
+          if (!aAssigned && bAssigned) return -1;
+          if (aAssigned && !bAssigned) return 1;
+          comp = (a.empNo || '').localeCompare(b.empNo || '');
+        }
+      } else if (sortField === 'EMP_NO') {
+        comp = (a.empNo || '').localeCompare(b.empNo || '');
+      } else if (sortField === 'NAME') {
+        comp = (a.name || '').localeCompare(b.name || '');
+      } else if (sortField === 'EXPIRING_FIRST') {
+        const aExp = Boolean(
+          a.priority ||
+          (typeof a.daysToExpiry === 'number' && a.daysToExpiry <= 60) ||
+          (a.cardStatus && /expir/i.test(a.cardStatus))
+        );
+        const bExp = Boolean(
+          b.priority ||
+          (typeof b.daysToExpiry === 'number' && b.daysToExpiry <= 60) ||
+          (b.cardStatus && /expir/i.test(b.cardStatus))
+        );
+        if (aExp && !bExp) comp = -1;
+        else if (!aExp && bExp) comp = 1;
+        else if (aExp && bExp) {
+          const aDays = typeof a.daysToExpiry === 'number' ? a.daysToExpiry : 9999;
+          const bDays = typeof b.daysToExpiry === 'number' ? b.daysToExpiry : 9999;
+          comp = aDays - bDays;
+        }
+        if (comp === 0) {
+          const aAssigned = Boolean(a.assignedClinicId || a.assignedClinicCode);
+          const bAssigned = Boolean(b.assignedClinicId || b.assignedClinicCode);
+          if (!aAssigned && bAssigned) return -1;
+          if (aAssigned && !bAssigned) return 1;
+          comp = (a.empNo || '').localeCompare(b.empNo || '');
+        }
+      } else {
+        // UNASSIGNED_FIRST (Default & recommended view)
+        const aAssigned = Boolean(a.assignedClinicId || a.assignedClinicCode);
+        const bAssigned = Boolean(b.assignedClinicId || b.assignedClinicCode);
+        if (!aAssigned && bAssigned) return -1;
+        if (aAssigned && !bAssigned) return 1;
+
+        const aExpiring = Boolean(
+          a.priority ||
+          (typeof a.daysToExpiry === 'number' && a.daysToExpiry <= 60) ||
+          (a.cardStatus && /expir/i.test(a.cardStatus))
+        );
+        const bExpiring = Boolean(
+          b.priority ||
+          (typeof b.daysToExpiry === 'number' && b.daysToExpiry <= 60) ||
+          (b.cardStatus && /expir/i.test(b.cardStatus))
+        );
+        if (aExpiring && !bExpiring) return -1;
+        if (!aExpiring && bExpiring) return 1;
+
+        if (aExpiring && bExpiring) {
+          const aDays = typeof a.daysToExpiry === 'number' ? a.daysToExpiry : 9999;
+          const bDays = typeof b.daysToExpiry === 'number' ? b.daysToExpiry : 9999;
+          if (aDays !== bDays) {
+            return aDays - bDays;
+          }
+        }
+
+        comp = (a.empNo || '').localeCompare(b.empNo || '');
+      }
+
+      return sortOrder === 'desc' ? -comp : comp;
+    });
+
     return list;
-  }, [activeBatch.employees, quickSort]);
+  }, [activeBatch?.employees, statusFilter, clinicFilter, employeeSearch, sortField, sortOrder]);
 
   const totalPages = Math.max(1, Math.ceil(processedEmployees.length / pageSize));
   const displayedEmployees = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
     return processedEmployees.slice(start, start + pageSize);
   }, [processedEmployees, currentPage, pageSize]);
-
-  // Auto select all displayed employees on page
-  useEffect(() => {
-    setSelectedEmployeeIds(displayedEmployees.map(e => e.id));
-  }, [displayedEmployees]);
 
   // Compute Total Telemetry Metrics
   const telemetry = useMemo(() => {
@@ -389,19 +671,49 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
 
   // Toggle selection for a single employee
   const handleToggleSelect = (id: string) => {
+    let updated: string[];
     if (selectedEmployeeIds.includes(id)) {
-      setSelectedEmployeeIds(selectedEmployeeIds.filter(i => i !== id));
+      updated = selectedEmployeeIds.filter(i => i !== id);
     } else {
-      setSelectedEmployeeIds([...selectedEmployeeIds, id]);
+      updated = [...selectedEmployeeIds, id];
     }
+    setSelectedEmployeeIds(updated);
+    setAssignCount(updated.length);
   };
 
   // Toggle select all on current page
   const handleToggleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedEmployeeIds(displayedEmployees.map(e => e.id));
+      const allIds = displayedEmployees.map(e => e.id);
+      setSelectedEmployeeIds(allIds);
+      setAssignCount(allIds.length);
     } else {
       setSelectedEmployeeIds([]);
+      setAssignCount(0);
+    }
+  };
+
+  // Dedicated Deselect All
+  const handleDeselectAll = () => {
+    setSelectedEmployeeIds([]);
+    setAssignCount(0);
+  };
+
+  // Dedicated Select All
+  const handleSelectAll = () => {
+    const allIds = displayedEmployees.map(e => e.id);
+    setSelectedEmployeeIds(allIds);
+    setAssignCount(allIds.length);
+  };
+
+  // Handle manual input of assign count
+  const handleAssignCountChange = (val: number) => {
+    const count = Math.max(0, Math.min(val, activeBatch.totalEmployees));
+    setAssignCount(count);
+    if (count === 0) {
+      setSelectedEmployeeIds([]);
+    } else {
+      setSelectedEmployeeIds(displayedEmployees.slice(0, count).map(e => e.id));
     }
   };
 
@@ -409,7 +721,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
   const handleAssignToCenter = async () => {
     let toAssign = [...selectedEmployeeIds];
     if (toAssign.length === 0) {
-      const unassigned = activeBatch.employees.filter(e => !e.assignedClinicId);
+      const unassigned = processedEmployees.filter(e => !e.assignedClinicId && !e.assignedClinicCode);
       toAssign = unassigned.slice(0, assignCount || 1).map(e => e.id);
     }
     if (toAssign.length === 0) {
@@ -423,6 +735,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
       setToastMessage(`Successfully assigned ${toAssign.length} employees to ${clinic.name}!`);
       setTimeout(() => setToastMessage(''), 5000);
       setSelectedEmployeeIds([]);
+      setAssignCount(0);
       await loadData();
     } catch (e: any) {
       alert(`Assignment failed: ${e.response?.data?.error || e.message}`);
@@ -431,7 +744,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
 
   // Auto-Split Batch Across All 5 Accredited Clinics
   const handleAutoSplit = async () => {
-    const unassigned = activeBatch.employees.filter(e => !e.assignedClinicId);
+    const unassigned = processedEmployees.filter(e => !e.assignedClinicId && !e.assignedClinicCode);
     if (unassigned.length === 0) {
       alert('All employees in this batch are already assigned to medical centers.');
       return;
@@ -452,6 +765,8 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
         `Auto-Split complete: ${unassigned.length} employees evenly allocated across 5 accredited medical centers!`
       );
       setTimeout(() => setToastMessage(''), 5000);
+      setSelectedEmployeeIds([]);
+      setAssignCount(0);
       await loadData();
     } catch (e: any) {
       alert(`Auto-Split failed: ${e.response?.data?.error || e.message}`);
@@ -480,6 +795,35 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
       await loadData();
     } catch (e: any) {
       alert(`Assign failed: ${e.response?.data?.error || e.message}`);
+    }
+  };
+
+  // Cancel Request (HR / Requester)
+  const handleCancelRequest = async (emp: BatchEmployee) => {
+    if (!window.confirm(`Are you sure you want to cancel medical clearance request for ${emp.name} (${emp.empNo})?`)) {
+      return;
+    }
+    try {
+      await api.cancelRequest(emp.id);
+      setToastMessage(`Request for ${emp.name} was successfully cancelled.`);
+      setTimeout(() => setToastMessage(''), 5000);
+      await loadData();
+    } catch (e: any) {
+      alert(`Cancel failed: ${e.response?.data?.error || e.message}`);
+    }
+  };
+
+  // Reject Request (Central Team)
+  const handleRejectRequest = async (emp: BatchEmployee) => {
+    const reason = window.prompt(`Enter rejection reason for candidate ${emp.name} (${emp.empNo}):`, 'Incomplete documentation');
+    if (reason === null) return;
+    try {
+      await api.rejectRequest(emp.id, reason);
+      setToastMessage(`Request for ${emp.name} has been rejected with reason: "${reason}".`);
+      setTimeout(() => setToastMessage(''), 5000);
+      await loadData();
+    } catch (e: any) {
+      alert(`Reject failed: ${e.response?.data?.error || e.message}`);
     }
   };
 
@@ -512,7 +856,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
   };
 
   return (
-    <div className="p-4 lg:p-6 max-w-[1600px] mx-auto space-y-5">
+    <div className="p-3 sm:p-4 lg:p-5 max-w-[1780px] mx-auto space-y-5">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-bold flex items-center justify-between shadow-sm animate-fade-in">
@@ -527,29 +871,23 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
       )}
 
       {/* 1. TOP HEADER & PLANT FILTER BAR */}
-      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         {/* Left: Brand Identity + Subtitle */}
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-teal-600/10 text-teal-700 flex items-center justify-center shrink-0">
+          <div className="h-10 w-10 rounded-xl bg-secondary/10 text-secondary flex items-center justify-center shrink-0">
             <span className="material-symbols-outlined text-[24px]">medical_services</span>
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="font-display font-extrabold text-base lg:text-lg text-slate-900 leading-tight">
-                Occupational Health & Medical Clearance
-              </h1>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-emerald-100 text-emerald-800">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
-                <span>Live Operations</span>
-              </span>
-            </div>
+            <h1 className="font-display font-extrabold text-base lg:text-lg text-slate-900 leading-tight">
+              Occupational Health & Medical Clearance
+            </h1>
             <p className="text-xs text-slate-500 mt-0.5">
               Enterprise Employee Screening & Clinic Dispatch Console
             </p>
           </div>
         </div>
 
-        {/* Center: Industrial Plant Segmented Tabs */}
+        {/* Industrial Plant Segmented Tabs */}
         <div className="flex items-center flex-wrap p-1 rounded-xl bg-slate-100 border border-slate-200 text-xs shrink-0">
           <button
             type="button"
@@ -596,42 +934,6 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
             Sadara Complex
           </button>
         </div>
-
-        {/* Right: Operational Cycle & Action Controls */}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-semibold border border-slate-200">
-            <span className="material-symbols-outlined text-[15px] text-slate-500">calendar_month</span>
-            <span>Cycle: Q4 (Nov 2026)</span>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleExportSummary}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 font-bold border border-slate-200 shadow-2xs transition-colors cursor-pointer"
-          >
-            <span className="material-symbols-outlined text-[16px]">file_download</span>
-            <span>Export Summary</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsCreateBatchOpen(true)}
-            className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-teal-800 hover:bg-teal-900 text-white font-bold shadow-xs transition-colors cursor-pointer"
-          >
-            <span className="material-symbols-outlined text-[16px]">add_circle</span>
-            <span>Clearance Batch</span>
-          </button>
-
-          <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-            <div className="h-8 w-8 rounded-full bg-slate-800 text-white font-bold flex items-center justify-center text-xs">
-              S
-            </div>
-            <div className="hidden lg:block text-left">
-              <p className="text-[11px] font-bold text-slate-800 leading-tight">Dr. Chief</p>
-              <p className="text-[10px] text-slate-400">Occupational Physician</p>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* 2. TELEMETRY / KPI ROW (5 CARDS) */}
@@ -642,15 +944,22 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
               Active Batches
             </span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-50 text-teal-800 border border-teal-200">
-              Medical Clearance
-            </span>
           </div>
-          <div className="my-2">
-            <span className="font-display font-extrabold text-2xl text-slate-900">
-              {telemetry.activeBatches}
-            </span>
-            <span className="text-xs text-slate-500 font-bold ml-1.5">Batches</span>
+          <div className="flex items-end justify-between gap-2 my-1.5">
+            <div>
+              <span className="font-display font-extrabold text-2xl text-slate-900 leading-none">
+                {telemetry.activeBatches}
+              </span>
+              <span className="text-xs text-slate-500 font-bold ml-1.5">Batches</span>
+            </div>
+            <Sparkline
+              color="#0f766e"
+              gradientId="grad-active-batches"
+              linePath="M 0 26 C 15 26, 25 21, 40 21 C 55 21, 65 24, 75 16 C 85 9, 93 7, 100 7"
+              areaPath="M 0 26 C 15 26, 25 21, 40 21 C 55 21, 65 24, 75 16 C 85 9, 93 7, 100 7 L 100 36 L 0 36 Z"
+              endX={100}
+              endY={7}
+            />
           </div>
           <p className="text-[11px] text-slate-500 truncate">
             Yanpet, Sadara, SABIC 100% active
@@ -663,12 +972,21 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
               Employees Requested
             </span>
-            <span className="material-symbols-outlined text-[18px] text-sky-600">badge</span>
           </div>
-          <div className="my-2">
-            <span className="font-display font-extrabold text-2xl text-slate-900">
-              {telemetry.totalEmployees}
-            </span>
+          <div className="flex items-end justify-between gap-2 my-1.5">
+            <div>
+              <span className="font-display font-extrabold text-2xl text-slate-900 leading-none">
+                {telemetry.totalEmployees}
+              </span>
+            </div>
+            <Sparkline
+              color="#0284c7"
+              gradientId="grad-emp-req"
+              linePath="M 0 28 C 15 28, 25 24, 40 20 C 55 16, 65 18, 75 13 C 85 8, 92 6, 100 6"
+              areaPath="M 0 28 C 15 28, 25 24, 40 20 C 55 16, 65 18, 75 13 C 85 8, 92 6, 100 6 L 100 36 L 0 36 Z"
+              endX={100}
+              endY={6}
+            />
           </div>
           <div className="flex items-center justify-between text-[11px] text-slate-500">
             <span>Across {telemetry.departmentsCount} business departments</span>
@@ -682,15 +1000,22 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
               Assigned Progress
             </span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-              {telemetry.assignedPercent}%
-            </span>
           </div>
-          <div className="my-2">
-            <span className="font-display font-extrabold text-2xl text-slate-900">
-              {telemetry.assignedTotal}
-            </span>
-            <span className="text-xs text-slate-500 font-semibold ml-1.5">({telemetry.assignedPercent}%)</span>
+          <div className="flex items-end justify-between gap-2 my-1.5">
+            <div>
+              <span className="font-display font-extrabold text-2xl text-slate-900 leading-none">
+                {telemetry.assignedTotal}
+              </span>
+              <span className="text-xs text-slate-500 font-semibold ml-1.5">({telemetry.assignedPercent}%)</span>
+            </div>
+            <Sparkline
+              color="#16a34a"
+              gradientId="grad-assigned-prog"
+              linePath="M 0 30 C 15 30, 25 25, 40 22 C 55 19, 68 12, 80 9 C 90 6, 95 5, 100 5"
+              areaPath="M 0 30 C 15 30, 25 25, 40 22 C 55 19, 68 12, 80 9 C 90 6, 95 5, 100 5 L 100 36 L 0 36 Z"
+              endX={100}
+              endY={5}
+            />
           </div>
           <div className="flex items-center justify-between text-[11px] text-slate-500">
             <span>&bull; Awaiting allocation</span>
@@ -704,13 +1029,22 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
               Pending Assignment
             </span>
-            <span className="material-symbols-outlined text-[18px] text-amber-500">schedule</span>
           </div>
-          <div className="my-2">
-            <span className="font-display font-extrabold text-2xl text-slate-900">
-              {telemetry.pendingTotal}
-            </span>
-            <span className="text-xs text-slate-500 font-bold ml-1.5">Left</span>
+          <div className="flex items-end justify-between gap-2 my-1.5">
+            <div>
+              <span className="font-display font-extrabold text-2xl text-slate-900 leading-none">
+                {telemetry.pendingTotal}
+              </span>
+              <span className="text-xs text-slate-500 font-bold ml-1.5">Left</span>
+            </div>
+            <Sparkline
+              color="#f59e0b"
+              gradientId="grad-pending-assign"
+              linePath="M 0 7 C 15 7, 25 11, 40 14 C 55 17, 65 19, 75 24 C 85 29, 93 29, 100 29"
+              areaPath="M 0 7 C 15 7, 25 11, 40 14 C 55 17, 65 19, 75 24 C 85 29, 93 29, 100 29 L 100 36 L 0 36 Z"
+              endX={100}
+              endY={29}
+            />
           </div>
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">
@@ -725,9 +1059,6 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
               Center Quotas
-            </span>
-            <span className="text-[10.5px] font-bold text-teal-700 hover:underline cursor-pointer">
-              5 Centers
             </span>
           </div>
           <div className="my-1.5 space-y-1 text-[11px] text-slate-600">
@@ -752,12 +1083,12 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
       </div>
 
       {/* 3. MAIN SPLIT VIEW: CLEARANCE BATCHES (LEFT) + BATCH DISPATCH WORKSPACE (RIGHT) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* LEFT COLUMN: CLEARANCE BATCHES LIST (4 COLS) */}
-        <div className="lg:col-span-4 bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 space-y-3.5">
+      <div className="flex flex-col lg:flex-row gap-4 items-start w-full">
+        {/* LEFT COLUMN: CLEARANCE BATCHES LIST - Compact width so table workspace gets maximum space */}
+        <div className="w-full lg:w-[275px] xl:w-[290px] shrink-0 bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-3.5 flex flex-col h-[780px]">
           {/* Header */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between shrink-0 mb-3">
+            <div className="flex items-center gap-1.5">
               <h2 className="font-display font-extrabold text-xs text-slate-800 uppercase tracking-wider">
                 Clearance Batches
               </h2>
@@ -776,21 +1107,21 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
           </div>
 
           {/* Search Box */}
-          <div className="relative">
-            <span className="material-symbols-outlined absolute left-3 top-2.5 text-slate-400 text-[16px]">
+          <div className="relative shrink-0 mb-3">
+            <span className="material-symbols-outlined absolute left-2.5 top-2 text-slate-400 text-[15px]">
               search
             </span>
             <input
               type="text"
-              placeholder="Search batch ID, plant, or test..."
+              placeholder="Search batches..."
               value={batchSearch}
               onChange={(e) => setBatchSearch(e.target.value)}
-              className="w-full bg-slate-50/70 border border-slate-200 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-teal-700"
+              className="w-full bg-slate-50/70 border border-slate-200 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-secondary"
             />
           </div>
 
-          {/* Batch Cards List */}
-          <div className="space-y-3">
+          {/* Batch Cards List - Scrollable Container */}
+          <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full">
             {filteredBatches.map((batch) => {
               const isSelected = batch.id === activeBatch.id;
               const percent = batch.totalEmployees > 0 ? Math.round((batch.assignedCount / batch.totalEmployees) * 100) : 0;
@@ -799,31 +1130,41 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                 <div
                   key={batch.id}
                   onClick={() => setSelectedBatchId(batch.id)}
-                  className={`p-3.5 rounded-2xl border transition-all cursor-pointer relative ${
+                  className={`p-3 rounded-xl border transition-all cursor-pointer relative ${
                     isSelected
-                      ? 'bg-teal-50/20 border-teal-700 ring-2 ring-teal-700/20 shadow-xs'
+                      ? 'bg-orange-50/20 border-secondary ring-2 ring-secondary/20 shadow-xs'
                       : 'bg-white border-slate-200 hover:bg-slate-50/60'
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="font-mono text-xs font-extrabold text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                  <div className="flex items-start justify-between gap-1.5">
+                    <span className="font-mono text-[11px] font-extrabold text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                       {batch.id}
                     </span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
-                      {batch.assignedCount === batch.totalEmployees ? 'Assigned' : 'Not assigned'}
+                    <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap ${
+                      batch.assignedCount === batch.totalEmployees
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : batch.assignedCount > 0
+                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                        : 'bg-rose-50 text-rose-700 border-rose-200'
+                    }`}>
+                      {batch.assignedCount === batch.totalEmployees
+                        ? 'Assigned'
+                        : batch.assignedCount > 0
+                        ? `Assigned (${batch.assignedCount}/${batch.totalEmployees})`
+                        : 'Not assigned'}
                     </span>
                   </div>
 
-                  <h3 className="font-display font-bold text-sm text-slate-900 mt-2">
+                  <h3 className="font-display font-bold text-xs text-slate-900 mt-1.5 truncate" title={batch.title}>
                     {batch.title}
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
+                  <p className="text-[10.5px] text-slate-500 mt-0.5 truncate" title={`${batch.requestedDate} • ${batch.plant}`}>
                     Requested {batch.requestedDate} &bull; {batch.plant}
                   </p>
 
                   {/* Progress Metric & Bar */}
-                  <div className="mt-3 space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
+                  <div className="mt-2.5 space-y-1">
+                    <div className="flex items-center justify-between text-[10.5px]">
                       <span className="text-slate-500">Pending / Total</span>
                       <span className="font-mono font-bold text-slate-800">
                         {batch.unassignedCount} / {batch.totalEmployees}
@@ -831,21 +1172,21 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                     </div>
                     <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-teal-600 rounded-full transition-all duration-300"
+                        className="h-full bg-secondary rounded-full transition-all duration-300"
                         style={{ width: `${percent}%` }}
                       />
                     </div>
                   </div>
 
                   {/* Footer */}
-                  <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-medium">
-                    <span className="truncate">{batch.protocolType}</span>
+                  <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10.5px] text-slate-500 font-medium">
+                    <span className="truncate max-w-[110px]" title={batch.protocolType}>{batch.protocolType}</span>
                     <span
-                      className={`font-bold ${
+                      className={`font-bold whitespace-nowrap ${
                         batch.isOverdue
                           ? 'text-rose-600'
                           : isSelected
-                          ? 'text-teal-700'
+                          ? 'text-secondary'
                           : 'text-slate-600'
                       }`}
                     >
@@ -858,13 +1199,13 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
           </div>
         </div>
 
-        {/* RIGHT COLUMN: SELECTED BATCH DISPATCH WORKSPACE (8 COLS) */}
-        <div className="lg:col-span-8 bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-5 space-y-4">
+        {/* RIGHT COLUMN: SELECTED BATCH DISPATCH WORKSPACE - Expanded to fit table without horizontal scroll */}
+        <div className="flex-1 min-w-0 w-full bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 sm:p-5 space-y-4">
           {/* 1. Selected Batch Header */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-slate-100">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-mono text-xs font-extrabold text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                <span className="font-mono text-xs font-extrabold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                   {activeBatch.id}
                 </span>
                 <span className="text-slate-400">&bull;</span>
@@ -882,10 +1223,6 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                   <span className="text-rose-600 font-bold">Remaining: {activeBatch.unassignedCount} to allocate</span>
                 </span>
                 <span className="text-slate-300">&bull;</span>
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                  <span className="material-symbols-outlined text-[13px] text-emerald-600">check_circle</span>
-                  <span>{activeBatch.doneCount} Certified & Done</span>
-                </span>
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
                   <span className="material-symbols-outlined text-[13px] text-amber-600">hourglass_top</span>
                   <span>{activeBatch.pendingCount} Pending Test Results</span>
@@ -920,18 +1257,27 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                 <span className="font-medium text-slate-600">Number of employees:</span>
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   max={activeBatch.totalEmployees}
                   value={assignCount}
-                  onChange={(e) => setAssignCount(Number(e.target.value))}
-                  className="w-16 px-2.5 py-1 bg-white border border-slate-300 rounded-lg font-mono font-bold text-slate-800 text-center focus:outline-none focus:border-teal-700"
+                  onChange={(e) => handleAssignCountChange(Number(e.target.value))}
+                  className="w-16 px-2.5 py-1 bg-white border border-slate-300 rounded-lg font-mono font-bold text-slate-800 text-center focus:outline-none focus:border-secondary"
                 />
                 <button
                   type="button"
-                  onClick={() => setAssignCount(activeBatch.totalEmployees)}
-                  className="px-2 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-[11px] cursor-pointer transition-colors"
+                  onClick={handleSelectAll}
+                  className="px-2.5 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-[11px] cursor-pointer transition-colors"
                 >
                   All {activeBatch.totalEmployees}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeselectAll}
+                  className="px-2.5 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-[11px] cursor-pointer transition-colors flex items-center gap-1"
+                  title="Deselect all employees"
+                >
+                  <span className="material-symbols-outlined text-[13px]">check_box_outline_blank</span>
+                  <span>Deselect All</span>
                 </button>
               </div>
 
@@ -940,7 +1286,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                 <select
                   value={selectedClinicId}
                   onChange={(e) => setSelectedClinicId(e.target.value)}
-                  className="px-3 py-1 bg-white border border-slate-300 rounded-lg font-semibold text-slate-800 focus:outline-none focus:border-teal-700 cursor-pointer"
+                  className="px-3 py-1 bg-white border border-slate-300 rounded-lg font-semibold text-slate-800 focus:outline-none focus:border-secondary cursor-pointer"
                 >
                   {clinicList.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -955,7 +1301,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
               <button
                 type="button"
                 onClick={handleAssignToCenter}
-                className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-teal-800 hover:bg-teal-900 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-secondary hover:bg-secondary-hover text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[16px]">check</span>
                 <span>Assign</span>
@@ -971,41 +1317,243 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
             </div>
           </div>
 
-          {/* 3. Table Toolbar (Counts & Quick Sort) */}
-          <div className="flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
-            <div className="flex items-center gap-2 text-slate-600">
-              <span className="font-bold text-slate-800">
-                Remaining for assignment ({activeBatch.unassignedCount})
-              </span>
-              <span className="text-slate-300">|</span>
-              <span className="text-rose-600 font-bold">1 Expedited Clearance Flagged</span>
+          {/* 3. Table Toolbar (Filters, Search & Sorting Controls) */}
+          <div className="space-y-2.5 pt-1">
+            {/* Row 1: Status Filters Pills & Telemetry */}
+            <div className="flex flex-wrap items-center justify-between gap-2.5 text-xs">
+              <div className="inline-flex items-center p-0.5 rounded-xl bg-slate-100 border border-slate-200/80">
+                <button
+                  type="button"
+                  onClick={() => { setStatusFilter('ALL'); setCurrentPage(1); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    statusFilter === 'ALL'
+                      ? 'bg-white text-slate-900 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>All</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    statusFilter === 'ALL' ? 'bg-slate-100 text-slate-800' : 'bg-slate-200 text-slate-600'
+                  }`}>
+                    {filterCounts.total}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setStatusFilter('WAITING'); setCurrentPage(1); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    statusFilter === 'WAITING'
+                      ? 'bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs'
+                      : 'text-slate-600 hover:text-amber-900'
+                  }`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  <span>Waiting Central</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    statusFilter === 'WAITING' ? 'bg-amber-200 text-amber-900' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {filterCounts.waiting}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setStatusFilter('SUBMITTED'); setCurrentPage(1); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    statusFilter === 'SUBMITTED'
+                      ? 'bg-blue-50 text-blue-900 border border-blue-300 shadow-2xs'
+                      : 'text-slate-600 hover:text-blue-900'
+                  }`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                  <span>Submitted</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    statusFilter === 'SUBMITTED' ? 'bg-blue-200 text-blue-900' : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {filterCounts.submitted}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setStatusFilter('UNASSIGNED'); setCurrentPage(1); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    statusFilter === 'UNASSIGNED'
+                      ? 'bg-white text-slate-900 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>Unassigned</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    statusFilter === 'UNASSIGNED' ? 'bg-slate-200 text-slate-900' : 'bg-slate-200 text-slate-600'
+                  }`}>
+                    {filterCounts.unassigned}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setStatusFilter('ASSIGNED'); setCurrentPage(1); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    statusFilter === 'ASSIGNED'
+                      ? 'bg-white text-slate-900 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>Assigned</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    statusFilter === 'ASSIGNED' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                  }`}>
+                    {filterCounts.assigned}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setStatusFilter('EXPIRING'); setCurrentPage(1); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    statusFilter === 'EXPIRING'
+                      ? 'bg-rose-50 text-rose-900 border border-rose-300 shadow-2xs'
+                      : 'text-slate-600 hover:text-rose-900'
+                  }`}
+                >
+                  <span>Expiring ≤60d</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    statusFilter === 'EXPIRING' ? 'bg-rose-200 text-rose-900' : 'bg-rose-100 text-rose-800'
+                  }`}>
+                    {filterCounts.expiring}
+                  </span>
+                </button>
+
+                {filterCounts.cancelled > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => { setStatusFilter('CANCELLED'); setCurrentPage(1); }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      statusFilter === 'CANCELLED'
+                        ? 'bg-slate-200 text-slate-900 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <span>Cancelled</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-slate-300 text-slate-700">
+                      {filterCounts.cancelled}
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              {/* Counts & Selection Bar */}
+              <div className="flex items-center gap-2 text-slate-500 flex-wrap">
+                <span className="text-[11px]">
+                  Showing <strong className="text-slate-800">{processedEmployees.length}</strong> of{' '}
+                  <strong className="text-slate-800">{activeBatch.totalEmployees}</strong>
+                </span>
+
+                {selectedEmployeeIds.length > 0 && (
+                  <>
+                    <span className="text-slate-300">|</span>
+                    <span className="px-2 py-0.5 rounded bg-orange-100 text-orange-950 font-bold text-[11px]">
+                      {selectedEmployeeIds.length} Selected
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleDeselectAll}
+                      className="text-secondary hover:text-orange-700 text-[11px] font-bold cursor-pointer transition-colors hover:underline"
+                    >
+                      Deselect All
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 text-[11px] text-slate-500">
-              <span className="font-medium">Quick sort:</span>
-              <button
-                type="button"
-                onClick={() => setQuickSort(quickSort === 'EXPIRING_FIRST' ? 'DEFAULT' : 'EXPIRING_FIRST')}
-                className={`px-2 py-0.5 rounded font-bold transition-colors cursor-pointer ${
-                  quickSort === 'EXPIRING_FIRST'
-                    ? 'bg-amber-100 text-amber-900'
-                    : 'hover:text-slate-800'
-                }`}
-              >
-                Expiring Cards First
-              </button>
-              <span>&bull;</span>
-              <button
-                type="button"
-                onClick={() => setQuickSort(quickSort === 'DEPARTMENT' ? 'DEFAULT' : 'DEPARTMENT')}
-                className={`px-2 py-0.5 rounded font-bold transition-colors cursor-pointer ${
-                  quickSort === 'DEPARTMENT'
-                    ? 'bg-teal-100 text-teal-900'
-                    : 'hover:text-slate-800'
-                }`}
-              >
-                Department
-              </button>
+            {/* Row 2: Clinic Filter, Instant Search & Sort Options */}
+            <div className="flex flex-wrap items-center justify-between gap-2.5 p-2.5 bg-slate-50/80 rounded-xl border border-slate-200/90 text-xs">
+              <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[300px]">
+                {/* Medical Center / Clinic Filter Dropdown */}
+                <div className="flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px] text-slate-400">local_hospital</span>
+                  <select
+                    value={clinicFilter}
+                    onChange={(e) => { setClinicFilter(e.target.value); setCurrentPage(1); }}
+                    className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary cursor-pointer"
+                  >
+                    <option value="ALL">All Medical Centers ({filterCounts.total})</option>
+                    <option value="UNASSIGNED">Unassigned Only ({filterCounts.unassigned})</option>
+                    <optgroup label="Assigned Clinics">
+                      {clinicList.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.code}) — {filterCounts.clinicCounts[c.id] || 0}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+
+                {/* Instant Candidate Search */}
+                <div className="relative flex-1 min-w-[170px] max-w-xs">
+                  <span className="material-symbols-outlined text-[15px] text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                    search
+                  </span>
+                  <input
+                    type="text"
+                    value={employeeSearch}
+                    onChange={(e) => { setEmployeeSearch(e.target.value); setCurrentPage(1); }}
+                    placeholder="Filter ID, name, dept..."
+                    className="w-full pl-8 pr-7 py-1 bg-white border border-slate-300 rounded-lg text-xs text-slate-800 focus:outline-none focus:border-secondary placeholder:text-slate-400"
+                  />
+                  {employeeSearch && (
+                    <button
+                      type="button"
+                      onClick={() => { setEmployeeSearch(''); setCurrentPage(1); }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-[12px] font-bold cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Clear / Reset Filters Button */}
+                {(statusFilter !== 'ALL' || clinicFilter !== 'ALL' || employeeSearch.trim() !== '' || sortField !== 'UNASSIGNED_FIRST' || sortOrder !== 'asc') && (
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-800 px-2 py-1 rounded bg-white border border-slate-200 transition-colors cursor-pointer"
+                    title="Reset all filters and sort order"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">restart_alt</span>
+                    <span>Reset</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Sort By Dropdown & Direction Toggle */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-medium text-slate-500">Sort by:</span>
+                <select
+                  value={sortField}
+                  onChange={(e) => { setSortField(e.target.value as any); setCurrentPage(1); }}
+                  className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary cursor-pointer"
+                >
+                  <option value="UNASSIGNED_FIRST">Unassigned First (Recommended)</option>
+                  <option value="EXPIRING_FIRST">Expiring Cards First</option>
+                  <option value="CLINIC">Assigned Medical Center</option>
+                  <option value="DEPARTMENT">Department</option>
+                  <option value="EMP_NO">Employee ID</option>
+                  <option value="NAME">Employee Name</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'))}
+                  className="p-1 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors cursor-pointer flex items-center justify-center w-7 h-7"
+                  title={`Toggle sort direction (current: ${sortOrder === 'asc' ? 'Ascending' : 'Descending'})`}
+                >
+                  {sortOrder === 'asc' ? '▲' : '▼'}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1014,7 +1562,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50/90 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold tracking-wider">
                 <tr>
-                  <th className="py-2.5 px-3 w-8">
+                  <th className="py-2 px-2 w-7">
                     <input
                       type="checkbox"
                       checked={
@@ -1022,20 +1570,104 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                         displayedEmployees.every((e) => selectedEmployeeIds.includes(e.id))
                       }
                       onChange={(e) => handleToggleSelectAll(e.target.checked)}
-                      className="rounded text-teal-700 focus:ring-teal-700 cursor-pointer"
+                      className="rounded text-secondary focus:ring-secondary cursor-pointer"
                     />
                   </th>
-                  <th className="py-2.5 px-2 w-8">#</th>
-                  <th className="py-2.5 px-3">Employee ID</th>
-                  <th className="py-2.5 px-3">Employee Name</th>
-                  <th className="py-2.5 px-3">Department</th>
-                  <th className="py-2.5 px-3">Current Medical Card Status</th>
-                  <th className="py-2.5 px-3">PDF / Report Status</th>
-                  <th className="py-2.5 px-3 text-right">Actions</th>
+                  <th className="py-2 px-1.5 w-7 text-center">#</th>
+                  <th
+                    onClick={() => handleSortChange('EMP_NO')}
+                    className="py-2 px-2 cursor-pointer hover:text-slate-800 transition-colors select-none whitespace-nowrap"
+                    title="Click to sort by Employee ID"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Employee ID</span>
+                      {sortField === 'EMP_NO' && (
+                        <span className="text-[11px] text-secondary font-bold">
+                          {sortOrder === 'asc' ? '▲' : '▼'}
+                        </span>
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSortChange('NAME')}
+                    className="py-2 px-2 cursor-pointer hover:text-slate-800 transition-colors select-none whitespace-nowrap"
+                    title="Click to sort by Employee Name"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Employee Name</span>
+                      {sortField === 'NAME' && (
+                        <span className="text-[11px] text-secondary font-bold">
+                          {sortOrder === 'asc' ? '▲' : '▼'}
+                        </span>
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSortChange('DEPARTMENT')}
+                    className="py-2 px-2 cursor-pointer hover:text-slate-800 transition-colors select-none whitespace-nowrap"
+                    title="Click to sort by Department"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Department</span>
+                      {sortField === 'DEPARTMENT' && (
+                        <span className="text-[11px] text-secondary font-bold">
+                          {sortOrder === 'asc' ? '▲' : '▼'}
+                        </span>
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSortChange('EXPIRING_FIRST')}
+                    className="py-2 px-2 cursor-pointer hover:text-slate-800 transition-colors select-none whitespace-nowrap"
+                    title="Click to sort by Medical Card Status / Expiry"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Card Status</span>
+                      {sortField === 'EXPIRING_FIRST' && (
+                        <span className="text-[11px] text-secondary font-bold">
+                          {sortOrder === 'asc' ? '▲' : '▼'}
+                        </span>
+                      )}
+                    </div>
+                  </th>
+                  <th className="py-2 px-2 whitespace-nowrap">Workflow Status</th>
+                  <th
+                    onClick={() => handleSortChange('CLINIC')}
+                    className="py-2 px-2 cursor-pointer hover:text-slate-800 transition-colors select-none whitespace-nowrap"
+                    title="Click to sort by Medical Center / Clinic"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Assigned Clinic</span>
+                      {sortField === 'CLINIC' && (
+                        <span className="text-[11px] text-secondary font-bold">
+                          {sortOrder === 'asc' ? '▲' : '▼'}
+                        </span>
+                      )}
+                    </div>
+                  </th>
+                  <th className="py-2 px-2 text-right whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
-                {displayedEmployees.map((emp, idx) => {
+                {displayedEmployees.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-12 text-center text-slate-400">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <span className="material-symbols-outlined text-4xl text-slate-300">filter_alt_off</span>
+                        <p className="font-semibold text-slate-700 text-sm">No employees match the current filters</p>
+                        <p className="text-xs text-slate-400">Try changing your medical center or status filter</p>
+                        <button
+                          type="button"
+                          onClick={handleResetFilters}
+                          className="mt-2 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                        >
+                          Reset All Filters
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  displayedEmployees.map((emp, idx) => {
                   const isChecked = selectedEmployeeIds.includes(emp.id);
                   const rowNumber = (currentPage - 1) * pageSize + idx + 1;
 
@@ -1043,48 +1675,52 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                     <tr
                       key={emp.id}
                       className={`hover:bg-slate-50/80 transition-colors ${
-                        emp.priority ? 'bg-amber-50/40' : isChecked ? 'bg-teal-50/15' : ''
+                        emp.priority ? 'bg-amber-50/40' : isChecked ? 'bg-orange-50/20' : ''
                       }`}
                     >
-                      <td className="py-2 px-3">
+                      <td className="py-2 px-2">
                         <input
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => handleToggleSelect(emp.id)}
-                          className="rounded text-teal-700 focus:ring-teal-700 cursor-pointer"
+                          className="rounded text-secondary focus:ring-secondary cursor-pointer"
                         />
                       </td>
 
-                      <td className="py-2 px-2 text-slate-400 font-mono text-[11px]">
+                      <td className="py-2 px-1.5 text-slate-400 font-mono text-[11px] text-center">
                         {rowNumber}
                       </td>
 
-                      <td className="py-2 px-3 font-mono font-bold text-slate-800">
+                      <td className="py-2 px-2 font-mono font-bold text-slate-800 whitespace-nowrap">
                         {emp.empNo}
                       </td>
 
-                      <td className="py-2 px-3">
-                        <div className="flex items-center gap-1.5">
+                      <td className="py-2 px-2">
+                        <div className="flex items-center gap-1.5 whitespace-nowrap">
                           <span className="font-bold text-slate-900">{emp.name}</span>
                           {emp.priority && (
-                            <span className="text-[9.5px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-amber-200/80 text-amber-900 border border-amber-300">
+                            <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-amber-200/80 text-amber-900 border border-amber-300">
                               Priority
                             </span>
                           )}
                         </div>
                       </td>
 
-                      <td className="py-2 px-3">
+                      <td className="py-2 px-2 whitespace-nowrap">
                         <span className="font-mono text-[11px] font-bold text-slate-700">
                           {emp.dept}
                         </span>
                       </td>
 
-                      <td className="py-2 px-3">
+                      <td className="py-2 px-2 whitespace-nowrap">
                         {emp.priority ? (
                           <span className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
                             <span>&Delta;</span>
                             <span>{emp.cardStatus}</span>
+                          </span>
+                        ) : (!emp.assignedClinicId && !emp.assignedClinicCode) ? (
+                          <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2 py-0.5 rounded bg-amber-50/70 text-amber-800 border border-amber-200">
+                            <span>{emp.cardStatus && emp.cardStatus !== 'No card' ? emp.cardStatus : 'Unassigned'}</span>
                           </span>
                         ) : (
                           <span className="text-slate-400 text-xs">
@@ -1093,19 +1729,80 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                         )}
                       </td>
 
-                      {/* Test & Certificate Status for HR */}
-                      <td className="py-2 px-3">
-                        {emp.isCertified ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              <span className="material-symbols-outlined text-[13px] text-emerald-600">verified</span>
-                              <span>Certified & Completed</span>
+                      {/* Workflow & Report Status */}
+                      <td className="py-2 px-2 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5 flex-nowrap">
+                          {/* Workflow Request Status Badge */}
+                          {emp.status === 'CANCELLED' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-300">
+                              <span className="material-symbols-outlined text-[12px] text-slate-400">cancel</span>
+                              <span>CANCELLED</span>
                             </span>
-                            {emp.pdfFileUrl && (
+                          ) : emp.status === 'REJECTED' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                              <span className="material-symbols-outlined text-[12px] text-rose-500">block</span>
+                              <span>REJECTED</span>
+                            </span>
+                          ) : emp.status === 'SUBMITTED' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                              <span>SUBMITTED</span>
+                            </span>
+                          ) : emp.status === 'WAITING' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200" title="WAITING_CENTRAL">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                              <span>WAITING CENTRAL</span>
+                            </span>
+                          ) : emp.status === 'SCHEDULED' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-sky-500"></span>
+                              <span>SCHEDULED</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                              <span>{emp.status || 'COMPLETED'}</span>
+                            </span>
+                          )}
+
+                          {/* Medical Result Badge */}
+                          {emp.isCertified ? (
+                            <div className="flex items-center gap-1">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <span className="material-symbols-outlined text-[12px] text-emerald-600">verified</span>
+                                <span>Fit</span>
+                              </span>
+                              {emp.pdfFileUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedPdfReport({
+                                      id: emp.reportId || emp.id,
+                                      employeeName: emp.name,
+                                      reportName: emp.testName || 'Medical Clearance Report',
+                                      iqamaId: emp.iqamaId || emp.empNo,
+                                      clinicName: emp.assignedClinicName || 'Accredited Medical Center',
+                                      fileUrl: emp.pdfFileUrl
+                                    });
+                                  }}
+                                  className="p-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+                                  title="View PDF Report"
+                                >
+                                  <span className="material-symbols-outlined text-[13px] text-red-500">picture_as_pdf</span>
+                                </button>
+                              )}
+                            </div>
+                          ) : emp.hasPdf ? (
+                            <div className="flex items-center gap-1">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200">
+                                <span className="material-symbols-outlined text-[12px] text-sky-600">pending_actions</span>
+                                <span>PDF Ready</span>
+                              </span>
                               <button
                                 type="button"
                                 onClick={() => {
                                   setSelectedPdfReport({
+                                    id: emp.reportId || emp.id,
                                     employeeName: emp.name,
                                     reportName: emp.testName || 'Medical Clearance Report',
                                     iqamaId: emp.iqamaId || emp.empNo,
@@ -1113,46 +1810,65 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                                     fileUrl: emp.pdfFileUrl
                                   });
                                 }}
-                                className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+                                className="p-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
                                 title="View PDF Report"
                               >
-                                <span className="material-symbols-outlined text-[14px] text-red-500">picture_as_pdf</span>
+                                <span className="material-symbols-outlined text-[13px] text-red-500">picture_as_pdf</span>
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </td>
+
+                      {/* 8. Assigned Clinic */}
+                      <td className="py-2 px-2 whitespace-nowrap">
+                        {(emp.assignedClinicId || emp.assignedClinicCode) ? (
+                          <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-100/90 border border-slate-200 text-xs font-semibold text-slate-800">
+                            <span className="font-mono font-bold text-[10.5px] bg-white px-1.5 py-0.2 rounded border border-slate-200 text-slate-900 shadow-2xs">
+                              {emp.assignedClinicCode || 'ARZ'}
+                            </span>
+                            <span className="text-slate-700 truncate max-w-[100px]" title={emp.assignedClinicName || undefined}>
+                              {emp.assignedClinicName?.replace(/ (Polyclinic|Medical Center|Medical Centre|Co\.).*/i, '') || 'Assigned'}
+                            </span>
+                            {emp.status !== 'CANCELLED' && emp.status !== 'REJECTED' && (
+                              <button
+                                type="button"
+                                onClick={() => handleUnassign(emp)}
+                                title="Unassign clinic"
+                                className="text-slate-400 hover:text-rose-600 transition-colors ml-0.5 cursor-pointer text-xs p-0.5"
+                              >
+                                ✕
                               </button>
                             )}
                           </div>
-                        ) : emp.hasPdf ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-sky-50 text-sky-700 border border-sky-200">
-                              <span className="material-symbols-outlined text-[13px] text-sky-600">pending_actions</span>
-                              <span>PDF Ready (Pending Sign-off)</span>
-                            </span>
+                        ) : emp.status !== 'CANCELLED' && emp.status !== 'REJECTED' ? (
+                          emp.priority ? (
                             <button
                               type="button"
-                              onClick={() => {
-                                setSelectedPdfReport({
-                                  employeeName: emp.name,
-                                  reportName: emp.testName || 'Medical Clearance Report',
-                                  iqamaId: emp.iqamaId || emp.empNo,
-                                  clinicName: emp.assignedClinicName || 'Accredited Medical Center',
-                                  fileUrl: emp.pdfFileUrl
-                                });
-                              }}
-                              className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
-                              title="View PDF Report"
+                              onClick={() => handleSingleAssign(emp)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-bold transition-all cursor-pointer shadow-2xs"
                             >
-                              <span className="material-symbols-outlined text-[14px] text-red-500">picture_as_pdf</span>
+                              <span className="material-symbols-outlined text-[13px]">bolt</span>
+                              <span>Expedite</span>
                             </button>
-                          </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleSingleAssign(emp)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white hover:bg-orange-50 text-secondary hover:text-orange-700 border border-orange-200 text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                            >
+                              <span className="material-symbols-outlined text-[13px]">add</span>
+                              <span>Assign</span>
+                            </button>
+                          )
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                            <span className="material-symbols-outlined text-[13px] text-amber-600">hourglass_top</span>
-                            <span>Pending Test Results</span>
-                          </span>
+                          <span className="text-slate-300 text-xs font-mono">—</span>
                         )}
                       </td>
 
-                      <td className="py-2 px-3 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
+                      {/* 9. Actions */}
+                      <td className="py-2 px-2 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
                           {emp.isCertified && emp.reportId && (
                             <button
                               type="button"
@@ -1167,47 +1883,55 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                                 }
                               }}
                               title="View Official Certificate"
-                              className="p-1 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold transition-colors cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold transition-colors cursor-pointer shadow-2xs"
                             >
-                              <span className="material-symbols-outlined text-[15px] text-emerald-600">verified</span>
+                              <span className="material-symbols-outlined text-[13px] text-emerald-600">verified</span>
+                              <span>Certificate</span>
                             </button>
                           )}
-                          {emp.assignedClinicId ? (
-                            <div className="flex items-center gap-1">
-                              <span className="text-[10.5px] font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
-                                {emp.assignedClinicCode || 'Assigned'}
-                              </span>
+
+                          {emp.status === 'CANCELLED' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold text-slate-400 bg-slate-50 border border-slate-200">
+                              Cancelled
+                            </span>
+                          ) : emp.status === 'REJECTED' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold text-rose-500 bg-rose-50 border border-rose-200">
+                              Rejected
+                            </span>
+                          ) : emp.status === 'COMPLETED' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200">
+                              Cleared
+                            </span>
+                          ) : (
+                            <div className="inline-flex items-center gap-1">
                               <button
                                 type="button"
-                                onClick={() => handleUnassign(emp)}
-                                title="Unassign clinic"
-                                className="text-[11px] text-slate-400 hover:text-rose-600 font-semibold cursor-pointer px-1"
+                                onClick={() => handleCancelRequest(emp)}
+                                title="Cancel medical clearance request"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-rose-50 hover:border-rose-200 text-slate-600 hover:text-rose-700 text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
                               >
-                                ✕
+                                <span className="material-symbols-outlined text-[12px] text-slate-400">cancel</span>
+                                <span>Cancel Request</span>
                               </button>
+
+                              {(userRole === 'CENTRAL' || userRole === 'ADMIN') && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRejectRequest(emp)}
+                                  title="Reject Request with reason"
+                                  className="inline-flex items-center px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-800 text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
+                                >
+                                  Reject
+                                </button>
+                              )}
                             </div>
-                          ) : emp.priority ? (
-                            <button
-                              type="button"
-                              onClick={() => handleSingleAssign(emp)}
-                              className="text-xs font-bold text-teal-700 hover:text-teal-900 cursor-pointer transition-colors"
-                            >
-                              Expedite
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleSingleAssign(emp)}
-                              className="text-xs font-bold text-slate-600 hover:text-teal-700 cursor-pointer transition-colors"
-                            >
-                              Assign
-                            </button>
                           )}
                         </div>
                       </td>
                     </tr>
                   );
-                })}
+                })
+              )}
               </tbody>
             </table>
           </div>
@@ -1216,9 +1940,13 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs pt-1 border-t border-slate-100 text-slate-500">
             <div>
               Showing <strong className="text-slate-800">{displayedEmployees.length}</strong> of{' '}
-              <strong className="text-slate-800">{activeBatch.totalEmployees}</strong> employees in batch &bull;{' '}
-              <span className="font-bold text-teal-800">
-                All {selectedEmployeeIds.length} selected for dispatch
+              <strong className="text-slate-800">{processedEmployees.length}</strong>
+              {processedEmployees.length !== activeBatch.totalEmployees && (
+                <span className="text-slate-400"> (filtered from {activeBatch.totalEmployees})</span>
+              )}{' '}
+              candidates &bull;{' '}
+              <span className="font-bold text-slate-800">
+                {selectedEmployeeIds.length} selected for dispatch
               </span>
             </div>
 
@@ -1243,7 +1971,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                   onClick={() => setCurrentPage(i + 1)}
                   className={`h-7 w-7 rounded-lg font-bold text-xs transition-colors cursor-pointer ${
                     currentPage === i + 1
-                      ? 'bg-teal-800 text-white shadow-2xs'
+                      ? 'bg-secondary text-white shadow-2xs'
                       : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
                   }`}
                 >
@@ -1274,7 +2002,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[22px] text-teal-800">verified</span>
+                <span className="material-symbols-outlined text-[22px] text-secondary">verified</span>
                 <h3 className="font-display font-extrabold text-base text-slate-900">
                   {activeBatch.title} &bull; Specifications
                 </h3>
@@ -1306,7 +2034,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                 </div>
                 <div className="p-2.5 rounded-lg border border-slate-200 bg-white">
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Gate Pass Synchronization</span>
-                  <span className="font-bold text-teal-700">RFID Enabled</span>
+                  <span className="font-bold text-slate-800">RFID Enabled</span>
                 </div>
                 <div className="p-2.5 rounded-lg border border-slate-200 bg-white">
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Target SLA</span>
@@ -1322,7 +2050,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
             <div className="flex justify-end pt-2">
               <button
                 onClick={() => setIsProtocolSpecsOpen(false)}
-                className="px-4 py-2 rounded-xl bg-teal-800 text-white font-bold text-xs cursor-pointer hover:bg-teal-900"
+                className="px-4 py-2 rounded-xl bg-secondary hover:bg-secondary-hover text-white font-bold text-xs cursor-pointer shadow-xs transition-colors"
               >
                 Close Specifications
               </button>
@@ -1337,7 +2065,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-5 space-y-4">
             <div className="flex items-start justify-between pb-2 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[20px] text-teal-800">person_add</span>
+                <span className="material-symbols-outlined text-[20px] text-secondary">person_add</span>
                 <h3 className="font-display font-extrabold text-sm text-slate-900">
                   Add Staff to {activeBatch.id}
                 </h3>
@@ -1355,7 +2083,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                   placeholder="e.g. Abdullah Al-Mansoor"
                   value={newStaffName}
                   onChange={(e) => setNewStaffName(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-teal-700"
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary"
                 />
               </div>
 
@@ -1366,7 +2094,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                   placeholder="e.g. E10255"
                   value={newStaffNo}
                   onChange={(e) => setNewStaffNo(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-mono font-semibold text-slate-800 focus:outline-none focus:border-teal-700"
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-mono font-semibold text-slate-800 focus:outline-none focus:border-secondary"
                 />
               </div>
 
@@ -1375,7 +2103,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                 <select
                   value={newStaffDept}
                   onChange={(e) => setNewStaffDept(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-teal-700"
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary"
                 >
                   <option value="LOGISTIC">LOGISTIC</option>
                   <option value="ISSD">ISSD</option>
@@ -1423,7 +2151,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                     alert(`Failed to add staff: ${e?.message}`);
                   }
                 }}
-                className="px-4 py-1.5 rounded-lg bg-teal-800 text-white font-bold text-xs"
+                className="px-4 py-1.5 rounded-lg bg-secondary hover:bg-secondary-hover text-white font-bold text-xs shadow-xs cursor-pointer transition-colors"
               >
                 Add Worker
               </button>
@@ -1438,7 +2166,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-5 space-y-4">
             <div className="flex items-start justify-between pb-2 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[20px] text-teal-800">playlist_add</span>
+                <span className="material-symbols-outlined text-[20px] text-secondary">playlist_add</span>
                 <h3 className="font-display font-extrabold text-sm text-slate-900">
                   New Clearance Batch
                 </h3>
@@ -1453,14 +2181,20 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                 <label className="block text-slate-700 font-bold mb-1">Batch Title</label>
                 <input
                   type="text"
+                  value={newBatchTitle}
+                  onChange={(e) => setNewBatchTitle(e.target.value)}
                   placeholder="e.g. Yanpet Turnaround Q4 Intake"
-                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-teal-700"
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary"
                 />
               </div>
 
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Industrial Plant / Facility</label>
-                <select className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-teal-700">
+                <select
+                  value={newBatchPlant}
+                  onChange={(e) => setNewBatchPlant(e.target.value as any)}
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary"
+                >
                   <option value="YANPET">Yanpet Petrochemical</option>
                   <option value="SABIC">SABIC Jubail Site</option>
                   <option value="SADARA">Sadara Complex South</option>
@@ -1470,12 +2204,39 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
 
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Medical Protocol Type</label>
-                <select className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-teal-700">
+                <select
+                  value={newBatchTestId}
+                  onChange={(e) => setNewBatchTestId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary"
+                >
                   <option value="5004972">Yanpet medical test (Material #5004972)</option>
                   <option value="5004959">SABIC medical screening with TSH (#5004959)</option>
                   <option value="5004955">Sadara medical test (#5004955)</option>
                   <option value="5004965">General medical fitness (#5004965)</option>
                 </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Lead Employee Badge</label>
+                  <input
+                    type="text"
+                    value={newBatchEmpNo}
+                    onChange={(e) => setNewBatchEmpNo(e.target.value)}
+                    placeholder="e.g. 11000018"
+                    className="w-full rounded-lg border border-slate-300 p-2 text-xs font-mono font-semibold text-slate-800 focus:outline-none focus:border-secondary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Lead Employee Name</label>
+                  <input
+                    type="text"
+                    value={newBatchEmpName}
+                    onChange={(e) => setNewBatchEmpName(e.target.value)}
+                    placeholder="Full Name"
+                    className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1487,11 +2248,36 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = () => {
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  setToastMessage('New batch draft created and added to queue!');
-                  setIsCreateBatchOpen(false);
+                onClick={async () => {
+                  const batchId = `REQ-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+                  const plantNameMap: Record<string, string> = {
+                    YANPET: 'Yanpet Plant',
+                    SABIC: 'Jubail Site',
+                    SADARA: 'Complex South',
+                    OTHER: 'Logistics Wing'
+                  };
+                  try {
+                    await api.createRequest({
+                      employeeNo: newBatchEmpNo.trim() || `E${Math.floor(10000 + Math.random() * 89999)}`,
+                      name: newBatchEmpName.trim() || 'Batch Lead Personnel',
+                      department: newBatchPlant === 'OTHER' ? 'LOGISTIC' : 'PMTA',
+                      testId: newBatchTestId,
+                      note: JSON.stringify({
+                        batchId,
+                        batchName: newBatchTitle.trim() || `Clearance Batch ${batchId}`,
+                        plant: plantNameMap[newBatchPlant] || 'Main Facility',
+                        plantCategory: newBatchPlant
+                      })
+                    });
+                    await loadData();
+                    setSelectedBatchId(batchId);
+                    setToastMessage(`Batch ${batchId} (${newBatchTitle}) created and persisted to database!`);
+                    setIsCreateBatchOpen(false);
+                  } catch (e: any) {
+                    setToastMessage(e?.response?.data?.error || 'Failed to create batch on server');
+                  }
                 }}
-                className="px-4 py-1.5 rounded-lg bg-teal-800 text-white font-bold text-xs"
+                className="px-4 py-1.5 rounded-lg bg-secondary hover:bg-secondary-hover text-white font-bold text-xs shadow-xs cursor-pointer transition-colors"
               >
                 Create Batch
               </button>

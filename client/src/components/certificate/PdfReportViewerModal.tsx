@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { api } from '../../api/client';
 
 interface PdfReportViewerModalProps {
   report: {
@@ -21,13 +22,43 @@ export const PdfReportViewerModal: React.FC<PdfReportViewerModalProps> = ({
   onClose,
   onUploadForRecord
 }) => {
+  const [blobUrl, setBlobUrl] = useState<string>('');
+  const [loadingPdf, setLoadingPdf] = useState<boolean>(false);
+
+  useEffect(() => {
+    let active = true;
+    let createdUrl = '';
+
+    const fetchPdf = async () => {
+      if (!report) return;
+      if (report.id) {
+        setLoadingPdf(true);
+        try {
+          const res = await api.getReportPdfBlob(report.id);
+          if (active && res.data) {
+            createdUrl = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+            setBlobUrl(createdUrl);
+          }
+        } catch (e) {
+          console.warn('Authenticated file stream error, checking fallback URL', e);
+        } finally {
+          if (active) setLoadingPdf(false);
+        }
+      }
+    };
+
+    fetchPdf();
+
+    return () => {
+      active = false;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [report?.id]);
+
   if (!report) return null;
 
-  // Resolve full URL if relative
-  const backendBase = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace('/api', '') : 'http://localhost:5000';
-  const pdfUrl = report.fileUrl
-    ? (report.fileUrl.startsWith('http') ? report.fileUrl : `${backendBase}${report.fileUrl}`)
-    : '';
+  // Resolve URL: use authenticated blobUrl (or external http URL if provided)
+  const pdfUrl = blobUrl || (report.fileUrl && report.fileUrl.startsWith('http') ? report.fileUrl : '');
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150">
@@ -124,7 +155,12 @@ export const PdfReportViewerModal: React.FC<PdfReportViewerModalProps> = ({
 
         {/* PDF Document Viewport */}
         <div className="flex-1 bg-slate-100 p-2 sm:p-4 overflow-hidden flex flex-col items-center justify-center">
-          {pdfUrl ? (
+          {loadingPdf ? (
+            <div className="text-center space-y-2">
+              <div className="h-8 w-8 mx-auto rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              <p className="text-xs font-semibold text-slate-600">Streaming authenticated PDF report...</p>
+            </div>
+          ) : pdfUrl ? (
             <iframe
               src={pdfUrl}
               className="w-full h-full rounded-xl bg-white border border-slate-300 shadow-inner"

@@ -1,6 +1,8 @@
 {
   "slotExpiryDays": 7,
   "autoExpireSlots": true,
-  "lastUpdated": "2026-11-06T15:53:04.581Z",
-  "updatedBy": "System Administrator"
+  "slotExpiryBasis": "CREATED_DATE",
+  "autoArchiveCompleted": true,
+  "lastUpdated": "2026-11-07T11:34:57.528Z",
+  "updatedBy": "System Default"
 }

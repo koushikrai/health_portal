@@ -1,7 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { Role } from '@prisma/client';
-import prisma from '../prisma';
+import { config } from '../config';
+import { UserRepository } from '../repositories/userRepository';
 
 export interface AuthUser {
   id: string;
@@ -20,8 +21,6 @@ declare global {
   }
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ecc-health-clearance-secret-2026';
-
 export const authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
@@ -31,13 +30,10 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     }
 
     const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    const decoded = jwt.verify(token, config.jwtSecret) as any;
 
-    // Verify user exists and is active in database
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.id },
-      include: { vendor: true }
-    });
+    // Verify user exists and is active in database via Data Tier repository
+    const user = await UserRepository.findById(decoded.id);
 
     if (!user || !user.isActive) {
       res.status(401).json({ error: 'Unauthorized: User account not found or inactive' });
@@ -65,7 +61,8 @@ export const requireRole = (allowedRoles: Role[]) => {
       return;
     }
 
-    if (req.user.role === Role.ADMIN || allowedRoles.includes(req.user.role) || (req.user.impersonatorId && allowedRoles.includes(Role.ADMIN))) {
+    // Role check: ADMIN role or user possessing explicit role in allowed list
+    if (req.user.role === Role.ADMIN || allowedRoles.includes(req.user.role)) {
       return next();
     }
 

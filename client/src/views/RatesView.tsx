@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { HeroBanner } from '../components/layout/HeroBanner';
 import { StatCard } from '../components/ui/StatCard';
 import { api } from '../api/client';
@@ -7,8 +7,22 @@ export const RatesView: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<'ledger' | 'bands' | 'sap'>('ledger');
   const [employees, setEmployees] = useState<any[]>([]);
   const [rates, setRates] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [deptFilter, setDeptFilter] = useState('All');
+  const [tierFilter, setTierFilter] = useState('All');
+
+  // Infinite Scroll State for Employee Ledger
+  const [displayLimit, setDisplayLimit] = useState<number>(20);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // Employee Profile & SAP Rate Edit Modal State
+  const [selectedEmpDetail, setSelectedEmpDetail] = useState<any | null>(null);
+  const [loadingEmpDetail, setLoadingEmpDetail] = useState(false);
+  const [editingSapRate, setEditingSapRate] = useState<{ contractId: string; testId: string; rate: number; includesVat: boolean; label: string } | null>(null);
+  const [savingRate, setSavingRate] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string>('');
 
   useEffect(() => {
     loadData();
@@ -16,41 +30,171 @@ export const RatesView: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [empRes, ratesRes] = await Promise.all([
-        api.searchEmployees(''),
-        api.getRates()
+      const [empRes, ratesRes, deptRes] = await Promise.all([
+        api.searchEmployees('', 1000),
+        api.getRates(),
+        api.getDepartments()
       ]);
-      setEmployees(empRes.data.employees);
-      setRates(ratesRes.data.rates);
+      setEmployees(empRes.data.employees || []);
+      setRates(ratesRes.data.rates || []);
+      setDepartments(deptRes.data.departments || []);
     } catch (e) {
       console.error(e);
     }
   };
 
+  const handleInspectEmployee = async (emp: any) => {
+    try {
+      setLoadingEmpDetail(true);
+      const res = await api.getEmployee(emp.id);
+      setSelectedEmpDetail(res.data?.employee || emp);
+    } catch (_) {
+      setSelectedEmpDetail(emp);
+    } finally {
+      setLoadingEmpDetail(false);
+    }
+  };
+
+  const handleSaveSapRate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSapRate) return;
+    try {
+      setSavingRate(true);
+      await api.admin.addContractRate({
+        contractId: editingSapRate.contractId,
+        testId: editingSapRate.testId,
+        rate: Number(editingSapRate.rate),
+        includesVat: editingSapRate.includesVat
+      });
+      await loadData();
+      setToastMsg(`SAP Contract rate updated to SAR ${Number(editingSapRate.rate).toFixed(2)}`);
+      setTimeout(() => setToastMsg(''), 4000);
+      setEditingSapRate(null);
+    } catch (err: any) {
+      alert(err?.response?.data?.error || 'Failed to update SAP contract rate');
+    } finally {
+      setSavingRate(false);
+    }
+  };
+
+  const handleExportMatrix = () => {
+    const headers = ['Clinic', 'SAP Material Code', 'Test Name', 'Contract No', 'Rate (SAR)', 'VAT Flag'];
+    const rows = rates.map((r: any) => [
+      r.contract?.vendor?.code || '',
+      r.testId,
+      `"${(r.test?.name || '').replace(/"/g, '""')}"`,
+      r.contract?.contractNo || '',
+      Number(r.rate).toFixed(2),
+      r.includesVat ? 'VAT Included' : '+15% VAT'
+    ]);
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const link = document.createElement('a');
+    link.setAttribute('href', encodeURI(csvContent));
+    link.setAttribute('download', `SAP_Rate_Disbursement_Matrix_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const avgHourlyRate = employees.length > 0
+    ? employees.reduce((sum, e) => sum + Number(e.hourlyRate || 35), 0) / employees.length
+    : 35.0;
+  const shiftHourlyBurn = Math.round(avgHourlyRate * employees.length);
+  const shiftDailyBurn = shiftHourlyBurn * 8;
+  const avgSapTestRate = rates.length > 0
+    ? rates.reduce((sum, r) => sum + Number(r.rate || 0), 0) / rates.length
+    : 0;
+
   const filteredEmployees = employees.filter(e => {
     const matchesSearch = e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           e.employeeNo.includes(searchQuery) ||
                           (e.position && e.position.toLowerCase().includes(searchQuery.toLowerCase()));
-    if (deptFilter === 'All') return matchesSearch;
-    return matchesSearch && (e.division === deptFilter || e.department === deptFilter);
+    const matchesDept = deptFilter === 'All' || e.division === deptFilter || e.department === deptFilter;
+    const rate = Number(e.hourlyRate || 35.0);
+    const tier = rate > 45 ? 'Tier A (Leadership)' : (rate > 35 ? 'Tier B (Senior Tech)' : 'Tier C (Standard)');
+    const matchesTier = tierFilter === 'All Wage Tiers' || tierFilter === 'All' || tier === tierFilter;
+    return matchesSearch && matchesDept && matchesTier;
   });
+
+  // Reset display limit when search or filters change
+  useEffect(() => {
+    setDisplayLimit(20);
+  }, [searchQuery, deptFilter, tierFilter]);
+
+  // Load next batch
+  const loadMore = () => {
+    if (isLoadingMore || displayLimit >= filteredEmployees.length) return;
+    setIsLoadingMore(true);
+    setTimeout(() => {
+      setDisplayLimit((prev) => Math.min(prev + 20, filteredEmployees.length));
+      setIsLoadingMore(false);
+    }, 120);
+  };
+
+  // IntersectionObserver for bottom sentinel
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && displayLimit < filteredEmployees.length && !isLoadingMore) {
+          loadMore();
+        }
+      },
+      {
+        root: null,
+        rootMargin: '250px',
+        threshold: 0.1
+      }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [displayLimit, filteredEmployees.length, isLoadingMore]);
+
+  // Window scroll fallback listener
+  useEffect(() => {
+    const handleScroll = () => {
+      if (displayLimit >= filteredEmployees.length || isLoadingMore) return;
+      const scrollY = window.scrollY || window.pageYOffset;
+      const windowHeight = window.innerHeight;
+      const documentHeight = document.documentElement.scrollHeight;
+
+      if (windowHeight + scrollY >= documentHeight - 350) {
+        loadMore();
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [displayLimit, filteredEmployees.length, isLoadingMore]);
+
+  const visibleEmployees = filteredEmployees.slice(0, displayLimit);
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
+      {toastMsg && (
+        <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-between">
+          <span>{toastMsg}</span>
+          <button onClick={() => setToastMsg('')} className="text-emerald-600 hover:text-emerald-900">✕</button>
+        </div>
+      )}
+
       {/* Hero Banner */}
       <HeroBanner
         title="Hourly Rates &"
         accentText="Disbursement Matrix"
         subtitle="Configure contracted workforce wage bands, manage individual trade rates, verify union overtime multipliers, and audit shift disbursement projections."
         telemetryChips={[
-          { icon: 'calculate', text: 'Blended Avg: SAR 34.08/hr' },
-          { icon: 'stacked_line_chart', text: 'Active Bands: 8 Trade Tiers' },
-          { icon: 'trending_up', text: 'Standard Shift Burn: SAR 14,314/h', highlight: true }
+          { icon: 'calculate', text: `Blended Avg: SAR ${avgHourlyRate.toFixed(2)}/hr` },
+          { icon: 'stacked_line_chart', text: `Active Depts: ${departments.length} Units` },
+          { icon: 'trending_up', text: `Standard Shift Burn: SAR ${shiftHourlyBurn.toLocaleString()}/h`, highlight: true }
         ]}
         actionButton={{
           label: 'Export Matrix',
           icon: 'download',
-          onClick: () => alert('Exporting Wage & Rate Matrix to CSV/PDF')
+          onClick: handleExportMatrix
         }}
       />
 
@@ -58,27 +202,27 @@ export const RatesView: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
         <StatCard
           label="BLENDED AVERAGE RATE"
-          value="SAR 34.08 / hr"
-          trendText="+2.4% vs Q1"
+          value={`SAR ${avgHourlyRate.toFixed(2)} / hr`}
+          trendText="Live Workforce Ledger"
           isPositiveTrend={true}
           icon="payments"
           ceilingPercent={76}
-          targetText="420 Active Workforce"
+          targetText={`${employees.length} Active Workforce`}
         />
 
         <StatCard
-          label="SHIFT BURN RATE (420 PAX)"
-          value="SAR 14,314"
+          label={`SHIFT BURN RATE (${employees.length} PAX)`}
+          value={`SAR ${shiftHourlyBurn.toLocaleString()}`}
           trendText="Standard 8h Shift"
           isPositiveTrend={true}
           icon="timelapse"
           ceilingPercent={82}
-          targetText="SAR 114,509 / day"
+          targetText={`SAR ${shiftDailyBurn.toLocaleString()} / day`}
         />
 
         <StatCard
-          label="WAGE BANDS & PARITY"
-          value="8 Bands"
+          label="DEPARTMENTS & WAGE BANDS"
+          value={`${departments.length} Depts`}
           trendText="100% GOSI"
           isPositiveTrend={true}
           icon="tune"
@@ -87,15 +231,15 @@ export const RatesView: React.FC = () => {
         />
 
         <StatCard
-          label="PENDING RATE REVIEWS"
-          value="2 Action Req."
-          trendText="Awaiting HR Sign-off"
-          isPositiveTrend={false}
-          icon="assignment_late"
-          iconBgColor="bg-amber-50"
-          iconColor="text-amber-600"
-          ceilingPercent={20}
-          targetText="Filter Pending Queue ->"
+          label="SAP CONTRACT TEST RATES"
+          value={`${rates.length} Active`}
+          trendText={`Avg SAR ${avgSapTestRate.toFixed(2)} / test`}
+          isPositiveTrend={true}
+          icon="receipt_long"
+          iconBgColor="bg-emerald-50"
+          iconColor="text-emerald-600"
+          ceilingPercent={100}
+          targetText="Verified SAP Ariba Schedule"
         />
       </div>
 
@@ -154,23 +298,32 @@ export const RatesView: React.FC = () => {
                 onChange={(e) => setDeptFilter(e.target.value)}
                 className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-700 font-semibold focus:outline-none focus:border-secondary shadow-sm"
               >
-                <option value="All">All Departments</option>
-                <option value="Trns & Lgst Dep">Trns & Lgst Dep</option>
-                <option value="Project Service">Project Service</option>
-                <option value="Finance Dept">Finance Dept</option>
-                <option value="Inspection Serv">Inspection Serv</option>
+                <option value="All">All Departments ({departments.length})</option>
+                {departments.map((d: any) => (
+                  <option key={d.id} value={d.name}>
+                    {d.name}
+                  </option>
+                ))}
               </select>
 
-              <select className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-700 font-semibold focus:outline-none focus:border-secondary shadow-sm">
-                <option>All Wage Tiers</option>
-                <option>Tier A (Leadership)</option>
-                <option>Tier B (Senior Tech)</option>
-                <option>Tier C (Standard)</option>
+              <select
+                value={tierFilter}
+                onChange={(e) => setTierFilter(e.target.value)}
+                className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-700 font-semibold focus:outline-none focus:border-secondary shadow-sm"
+              >
+                <option value="All">All Wage Tiers</option>
+                <option value="Tier A (Leadership)">Tier A (Leadership)</option>
+                <option value="Tier B (Senior Tech)">Tier B (Senior Tech)</option>
+                <option value="Tier C (Standard)">Tier C (Standard)</option>
               </select>
+
+              <div className="ml-auto text-xs font-medium text-slate-500 flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-2xs">
+                <span>Showing <strong className="text-slate-900">{visibleEmployees.length}</strong> of <strong className="text-slate-900">{filteredEmployees.length}</strong></span>
+              </div>
             </div>
           </div>
 
-          {/* Table */}
+          {/* Table with Infinite Scroll */}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
@@ -185,7 +338,7 @@ export const RatesView: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredEmployees.slice(0, 15).map(emp => {
+                {visibleEmployees.map(emp => {
                   const rate = Number(emp.hourlyRate || 35.0);
                   const estMonthly = Math.round(rate * 176);
                   return (
@@ -234,11 +387,11 @@ export const RatesView: React.FC = () => {
 
                       <td className="py-3.5 px-4 text-right">
                         <button
-                          onClick={() => alert(`Edit Rate Profile for ${emp.name}`)}
+                          onClick={() => handleInspectEmployee(emp)}
                           className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs px-3 py-1.5 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
                         >
-                          <span className="material-symbols-outlined text-[14px]">edit</span>
-                          <span>Set / Edit Rate</span>
+                          <span className="material-symbols-outlined text-[14px]">visibility</span>
+                          <span>{loadingEmpDetail && selectedEmpDetail?.id === emp.id ? 'Loading...' : 'Inspect Ledger'}</span>
                         </button>
                       </td>
                     </tr>
@@ -246,6 +399,32 @@ export const RatesView: React.FC = () => {
                 })}
               </tbody>
             </table>
+
+            {/* Empty State */}
+            {filteredEmployees.length === 0 && (
+              <div className="py-12 text-center text-slate-400">
+                <span className="material-symbols-outlined text-3xl mb-1 text-slate-300">person_search</span>
+                <p className="text-sm font-semibold text-slate-600">No employees found matching filter criteria</p>
+              </div>
+            )}
+
+            {/* Infinite Scroll Sentinel & Loading Indicator */}
+            {visibleEmployees.length < filteredEmployees.length && (
+              <div
+                ref={sentinelRef}
+                className="py-4 text-center text-xs text-slate-500 flex items-center justify-center gap-2 border-t border-slate-100 bg-slate-50/70"
+              >
+                <span className="h-4 w-4 border-2 border-secondary/30 border-t-secondary rounded-full animate-spin"></span>
+                <span className="font-semibold text-slate-700">Loading more employees... ({visibleEmployees.length} of {filteredEmployees.length} loaded)</span>
+              </div>
+            )}
+
+            {/* End of ledger message */}
+            {visibleEmployees.length >= filteredEmployees.length && filteredEmployees.length > 0 && (
+              <div className="py-3 text-center text-[11px] text-slate-400 border-t border-slate-100 font-medium bg-slate-50/40">
+                Showing all {filteredEmployees.length} employees &bull; End of ledger
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -273,7 +452,7 @@ export const RatesView: React.FC = () => {
                   <th className="py-3 px-3">Contract No.</th>
                   <th className="py-3 px-3 text-right">Contract Rate (SAR)</th>
                   <th className="py-3 px-3 text-right">VAT Flag</th>
-                  <th className="py-3 px-3 text-right">Valid Period</th>
+                  <th className="py-3 px-3 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
@@ -297,14 +476,162 @@ export const RatesView: React.FC = () => {
                         {r.includesVat ? 'VAT Included' : '+15% VAT'}
                       </span>
                     </td>
-                    <td className="py-2.5 px-3 text-right text-slate-400 font-mono text-[11px]">
-                      2026-01-01 to 2026-12-31
+                    <td className="py-2.5 px-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingSapRate({
+                            contractId: r.contractId,
+                            testId: r.testId,
+                            rate: Number(r.rate),
+                            includesVat: Boolean(r.includesVat),
+                            label: `${r.contract?.vendor?.code || 'Clinic'} — ${r.test?.name || r.testId}`
+                          })
+                        }
+                        className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] cursor-pointer"
+                      >
+                        Edit Rate
+                      </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* Employee Ledger & Medical Clearance History Modal (Powered by GET /api/employees/:id) */}
+      {selectedEmpDetail && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-5 border border-slate-200 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="font-display font-extrabold text-sm text-slate-900">{selectedEmpDetail.name}</h3>
+                <p className="text-xs text-slate-500 font-mono">
+                  EMP-{selectedEmpDetail.employeeNo} &bull; {selectedEmpDetail.department || 'Operations'} &bull; Iqama: {selectedEmpDetail.iqamaId || 'Verified'}
+                </p>
+              </div>
+              <button onClick={() => setSelectedEmpDetail(null)} className="text-slate-400 hover:text-slate-700 cursor-pointer">
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs bg-slate-50 p-3 rounded-xl border border-slate-200">
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Position / Trade</span>
+                <span className="font-bold text-slate-800">{selectedEmpDetail.position || 'Industrial Technician'}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Nationality</span>
+                <span className="font-bold text-slate-800">{selectedEmpDetail.nationality || 'SA / Expat Workforce'}</span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-[11px] font-bold uppercase text-slate-500 block">
+                Medical Clearance & Billing History ({selectedEmpDetail.requests?.length || 0} Records)
+              </span>
+              {selectedEmpDetail.requests && selectedEmpDetail.requests.length > 0 ? (
+                <div className="max-h-48 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl">
+                  {selectedEmpDetail.requests.map((r: any) => (
+                    <div key={r.id} className="p-2.5 text-xs flex items-center justify-between">
+                      <div>
+                        <div className="font-bold text-slate-800">{r.test?.name || r.testId}</div>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          {r.id} &bull; {r.vendor?.name || 'Unassigned'}
+                        </div>
+                      </div>
+                      <span className="font-mono font-bold text-slate-700">{r.status}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-slate-400 italic p-3 bg-slate-50 rounded-xl">
+                  No medical clearance requests recorded for this employee yet.
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedEmpDetail(null);
+                  setActiveSubTab('sap');
+                }}
+                className="px-3.5 py-1.5 rounded-lg bg-secondary text-white font-bold text-xs cursor-pointer"
+              >
+                View SAP Contract Rates
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedEmpDetail(null)}
+                className="px-3.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 font-bold text-xs cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit SAP Contract Rate Modal (Powered by POST /api/admin/rates) */}
+      {editingSapRate && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <form onSubmit={handleSaveSapRate} className="bg-white rounded-2xl max-w-md w-full p-5 border border-slate-200 shadow-2xl space-y-4 text-xs">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <h3 className="font-display font-extrabold text-sm text-slate-900">Update SAP Contract Rate</h3>
+              <button type="button" onClick={() => setEditingSapRate(null)} className="text-slate-400 hover:text-slate-700">
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 font-semibold text-slate-800">
+              {editingSapRate.label} (SAP #{editingSapRate.testId})
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 mb-1">Contracted Rate (SAR) *</label>
+              <input
+                type="number"
+                step="0.01"
+                required
+                value={editingSapRate.rate}
+                onChange={(e) => setEditingSapRate({ ...editingSapRate, rate: Number(e.target.value) })}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm font-mono font-bold text-slate-900"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="sapVatIncluded"
+                checked={editingSapRate.includesVat}
+                onChange={(e) => setEditingSapRate({ ...editingSapRate, includesVat: e.target.checked })}
+              />
+              <label htmlFor="sapVatIncluded" className="font-semibold text-slate-700">
+                Rate includes 15% ZATCA VAT
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingSapRate(null)}
+                className="px-3.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingRate}
+                className="px-4 py-1.5 rounded-lg bg-secondary text-white font-bold cursor-pointer disabled:opacity-50"
+              >
+                {savingRate ? 'Saving...' : 'Save SAP Rate'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

@@ -1,11 +1,10 @@
-import fs from 'fs';
-import path from 'path';
+import prisma from '../prisma';
 
 export interface SystemSettings {
-  slotExpiryDays: number; // Number of days before pre-booked slots disappear (default: 7)
-  autoExpireSlots: boolean; // Whether auto-expiry is active (default: true)
-  slotExpiryBasis: 'CREATED_DATE' | 'NEED_BY_DATE'; // Calculation basis (default: CREATED_DATE)
-  autoArchiveCompleted: boolean; // Whether completed allocations auto-archive (default: true)
+  slotExpiryDays: number;
+  autoExpireSlots: boolean;
+  slotExpiryBasis: 'CREATED_DATE' | 'NEED_BY_DATE';
+  autoArchiveCompleted: boolean;
   lastUpdated: string;
   updatedBy: string;
 }
@@ -19,42 +18,49 @@ const DEFAULT_SETTINGS: SystemSettings = {
   updatedBy: 'System Default'
 };
 
-const SETTINGS_FILE_PATH = path.join(__dirname, '../../data/system_settings.json');
-
 export class SettingsService {
   private static cachedSettings: SystemSettings | null = null;
-
-  private static ensureDir() {
-    const dir = path.dirname(SETTINGS_FILE_PATH);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-  }
+  private static lastCacheTime = 0;
+  private static CACHE_TTL_MS = 60_000; // 1 minute in-memory cache
 
   static async getSettings(): Promise<SystemSettings> {
+    const now = Date.now();
+    if (this.cachedSettings && (now - this.lastCacheTime < this.CACHE_TTL_MS)) {
+      return this.cachedSettings;
+    }
+
     try {
-      if (this.cachedSettings) {
-        return this.cachedSettings;
+      let record = await prisma.systemSetting.findUnique({
+        where: { id: 'SYSTEM_DEFAULT' }
+      });
+
+      if (!record) {
+        record = await prisma.systemSetting.create({
+          data: {
+            id: 'SYSTEM_DEFAULT',
+            slotExpiryDays: DEFAULT_SETTINGS.slotExpiryDays,
+            autoExpireSlots: DEFAULT_SETTINGS.autoExpireSlots,
+            slotExpiryBasis: DEFAULT_SETTINGS.slotExpiryBasis,
+            autoArchiveCompleted: DEFAULT_SETTINGS.autoArchiveCompleted,
+            updatedBy: DEFAULT_SETTINGS.updatedBy
+          }
+        });
       }
 
-      this.ensureDir();
-      if (!fs.existsSync(SETTINGS_FILE_PATH)) {
-        fs.writeFileSync(SETTINGS_FILE_PATH, JSON.stringify(DEFAULT_SETTINGS, null, 2), 'utf-8');
-        this.cachedSettings = { ...DEFAULT_SETTINGS };
-        return this.cachedSettings;
-      }
-
-      const content = fs.readFileSync(SETTINGS_FILE_PATH, 'utf-8');
-      const parsed = JSON.parse(content);
-      const loaded: SystemSettings = {
-        ...DEFAULT_SETTINGS,
-        ...parsed,
-        slotExpiryDays: Number(parsed.slotExpiryDays) || 7
+      const settings: SystemSettings = {
+        slotExpiryDays: record.slotExpiryDays,
+        autoExpireSlots: record.autoExpireSlots,
+        slotExpiryBasis: (record.slotExpiryBasis as any) || 'CREATED_DATE',
+        autoArchiveCompleted: record.autoArchiveCompleted,
+        lastUpdated: record.updatedAt.toISOString(),
+        updatedBy: record.updatedBy
       };
-      this.cachedSettings = loaded;
-      return loaded;
+
+      this.cachedSettings = settings;
+      this.lastCacheTime = now;
+      return settings;
     } catch (e) {
-      console.error('Error reading system_settings.json, falling back to defaults:', e);
+      console.warn('[SettingsService] Database query fallback:', e);
       return { ...DEFAULT_SETTINGS };
     }
   }
@@ -63,23 +69,41 @@ export class SettingsService {
     partial: Partial<SystemSettings>,
     updatedBy: string = 'Administrator'
   ): Promise<SystemSettings> {
-    try {
-      const current = await this.getSettings();
-      const updated: SystemSettings = {
-        ...current,
-        ...partial,
-        slotExpiryDays: partial.slotExpiryDays !== undefined ? Math.max(1, Math.min(365, Number(partial.slotExpiryDays))) : current.slotExpiryDays,
-        lastUpdated: new Date().toISOString(),
-        updatedBy
-      };
+    const current = await this.getSettings();
+    const expiryDays = partial.slotExpiryDays !== undefined
+      ? Math.max(1, Math.min(365, Number(partial.slotExpiryDays)))
+      : current.slotExpiryDays;
 
-      this.ensureDir();
-      fs.writeFileSync(SETTINGS_FILE_PATH, JSON.stringify(updated, null, 2), 'utf-8');
-      this.cachedSettings = updated;
-      return updated;
-    } catch (e) {
-      console.error('Error updating system_settings.json:', e);
-      throw new Error('Failed to persist system settings to disk');
-    }
+    const updated = await prisma.systemSetting.upsert({
+      where: { id: 'SYSTEM_DEFAULT' },
+      update: {
+        slotExpiryDays: expiryDays,
+        autoExpireSlots: partial.autoExpireSlots !== undefined ? Boolean(partial.autoExpireSlots) : current.autoExpireSlots,
+        slotExpiryBasis: partial.slotExpiryBasis || current.slotExpiryBasis,
+        autoArchiveCompleted: partial.autoArchiveCompleted !== undefined ? Boolean(partial.autoArchiveCompleted) : current.autoArchiveCompleted,
+        updatedBy
+      },
+      create: {
+        id: 'SYSTEM_DEFAULT',
+        slotExpiryDays: expiryDays,
+        autoExpireSlots: partial.autoExpireSlots !== undefined ? Boolean(partial.autoExpireSlots) : true,
+        slotExpiryBasis: partial.slotExpiryBasis || 'CREATED_DATE',
+        autoArchiveCompleted: partial.autoArchiveCompleted !== undefined ? Boolean(partial.autoArchiveCompleted) : true,
+        updatedBy
+      }
+    });
+
+    const settings: SystemSettings = {
+      slotExpiryDays: updated.slotExpiryDays,
+      autoExpireSlots: updated.autoExpireSlots,
+      slotExpiryBasis: (updated.slotExpiryBasis as any) || 'CREATED_DATE',
+      autoArchiveCompleted: updated.autoArchiveCompleted,
+      lastUpdated: updated.updatedAt.toISOString(),
+      updatedBy: updated.updatedBy
+    };
+
+    this.cachedSettings = settings;
+    this.lastCacheTime = Date.now();
+    return settings;
   }
 }

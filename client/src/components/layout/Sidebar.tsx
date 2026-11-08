@@ -33,8 +33,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'reports', label: 'Medical Clearance', icon: 'verified_user', allowedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'ADMIN'] },
     { id: 'clinic', label: 'Clinic Portal', icon: 'local_hospital', allowedRoles: ['CLINIC', 'ADMIN'] },
     { id: 'finance', label: 'Invoice Clearance', icon: 'receipt_long', allowedRoles: ['FINANCE', 'ADMIN'] },
+    { id: 'rates', label: 'Rates & Wage Bands', icon: 'calculate', allowedRoles: ['CENTRAL', 'FINANCE', 'ADMIN'] },
     { id: 'suppliers', label: 'Clinics & Contracts', icon: 'domain', allowedRoles: ['CENTRAL', 'FINANCE', 'ADMIN'] },
-    { id: 'audit', label: 'System Audit Log', icon: 'history', allowedRoles: ['ADMIN'] },
+    { id: 'audit', label: 'System Audit Log', icon: 'history', allowedRoles: ['ADMIN', 'CENTRAL', 'FINANCE'] },
     { id: 'admin', label: 'Administration', icon: 'admin_panel_settings', badge: 'Master', allowedRoles: ['ADMIN'] },
   ];
 
@@ -47,19 +48,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside className="w-64 bg-[#0A0F1D] text-white flex flex-col justify-between border-r border-slate-800 shrink-0 select-none sticky top-0 h-screen overflow-y-auto z-40">
       <div>
         {/* Brand Header */}
-        <div className="px-5 py-5 flex items-center justify-between border-b border-slate-800/60">
-          <div className="flex items-center gap-2">
-            <span className="font-display font-extrabold text-2xl tracking-tight text-white">expertise</span>
-            <span className="bg-secondary text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md tracking-wider">HEALTH</span>
+        <div className="px-5 py-4 flex items-center justify-between border-b border-slate-800/60">
+          <div className="flex items-center gap-2.5">
+            <img src="/expertise-logo-trans.png" alt="Expertise" className="h-6 w-auto object-contain" />
+            <span className="bg-secondary text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded tracking-wider uppercase">HEALTH</span>
           </div>
         </div>
 
         {/* Active Facility Card */}
         <div className="mx-3 mt-4 mb-3">
           <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 shadow-inner">
-            <div className="flex items-center justify-between mb-1">
+            <div className="mb-1">
               <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Operational Hub</span>
-              <span className="h-2 w-2 rounded-full bg-secondary shadow-sm shadow-secondary/60 animate-pulse"></span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -67,11 +67,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span className="text-white text-xs font-semibold">ECC Jubail Operations</span>
               </div>
             </div>
-            <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/80 text-[11px]">
+            <div className="mt-2 pt-2 border-t border-slate-800/80 text-[11px]">
               <span className="text-slate-400">Saudi Arabia</span>
-              <span className="px-1.5 py-0.5 rounded border border-emerald-500/30 text-emerald-400 text-[9.5px] font-semibold bg-emerald-950/40">
-                ACTIVE PORTAL
-              </span>
             </div>
           </div>
         </div>
