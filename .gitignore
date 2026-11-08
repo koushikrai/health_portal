@@ -430,7 +430,6 @@ FodyWeavers.xsd
 .env.local
 
 # Build and uploads output
-server/dist/
 client/dist/
 uploads/
 server/data/system_settings.json
