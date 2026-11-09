@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { HeroBanner } from '../components/layout/HeroBanner';
 import { StatCard } from '../components/ui/StatCard';
 import { api } from '../api/client';
 
@@ -181,22 +180,12 @@ export const RatesView: React.FC = () => {
         </div>
       )}
 
-      {/* Hero Banner */}
-      <HeroBanner
-        title="Hourly Rates &"
-        accentText="Disbursement Matrix"
-        subtitle="Configure contracted workforce wage bands, manage individual trade rates, verify union overtime multipliers, and audit shift disbursement projections."
-        telemetryChips={[
-          { icon: 'calculate', text: `Blended Avg: SAR ${avgHourlyRate.toFixed(2)}/hr` },
-          { icon: 'stacked_line_chart', text: `Active Depts: ${departments.length} Units` },
-          { icon: 'trending_up', text: `Standard Shift Burn: SAR ${shiftHourlyBurn.toLocaleString()}/h`, highlight: true }
-        ]}
-        actionButton={{
-          label: 'Export Matrix',
-          icon: 'download',
-          onClick: handleExportMatrix
-        }}
-      />
+      {/* 1. Page Header */}
+      <div className="pb-3 border-b border-slate-200">
+        <h1 className="text-[22px] font-bold text-[#1B2430] tracking-tight">
+          Hourly Rates &amp; Disbursement Matrix
+        </h1>
+      </div>
 
       {/* 4 KPI Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
@@ -271,8 +260,18 @@ export const RatesView: React.FC = () => {
           </button>
         </div>
 
-        <div className="text-xs text-slate-400 font-mono">
-          Site 04 Metro Terminal Labor Ledger
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleExportMatrix}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer shadow-2xs transition-all"
+            title="Export SAP Rate Disbursement Matrix CSV"
+          >
+            <span className="material-symbols-outlined text-[15px]">download</span>
+            <span>Export Matrix</span>
+          </button>
+          <div className="text-xs text-slate-400 font-mono">
+            Site 04 Metro Terminal Labor Ledger
+          </div>
         </div>
       </div>
 

@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { HeroBanner } from '../components/layout/HeroBanner';
 import { api } from '../api/client';
 
 export const SuppliersView: React.FC = () => {
@@ -144,22 +143,12 @@ export const SuppliersView: React.FC = () => {
         </div>
       )}
 
-      {/* Hero Banner */}
-      <HeroBanner
-        title="Accredited Medical Providers &"
-        accentText="SAP Test Rate Cards"
-        subtitle="Commercial Registration (CR) verification, ZATCA e-Invoicing compliance, daily quota governance, and negotiated SAP medical test rate schedules."
-        telemetryChips={[
-          { icon: 'verified_user', text: `Approved Clinics: ${clinics.length} Accredited` },
-          { icon: 'payments', text: `${clinics.reduce((sum, c) => sum + (c.contracts?.reduce((cs: number, con: any) => cs + (con.rates?.length || 0), 0) || 0), 0)} SAP Contract Rates Loaded` },
-          { icon: 'receipt', text: 'ZATCA 15% VAT & Net 30 Terms', highlight: true }
-        ]}
-        actionButton={{
-          label: 'Export Rate Cards (PDF)',
-          icon: 'download',
-          onClick: () => window.print()
-        }}
-      />
+      {/* 1. Page Header */}
+      <div className="pb-3 border-b border-slate-200">
+        <h1 className="text-[22px] font-bold text-[#1B2430] tracking-tight">
+          Accredited Medical Providers &amp; SAP Test Rate Cards
+        </h1>
+      </div>
 
       {/* Search Bar, Add Clinic Action, and Tier Filter Pills */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -177,6 +166,17 @@ export const SuppliersView: React.FC = () => {
 
         {/* Right Action Row: Add Clinic CTA + Tier Pills */}
         <div className="flex flex-wrap items-center gap-3">
+          {/* Export Rate Cards (PDF) */}
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer shadow-2xs transition-all"
+            title="Export Rate Cards (PDF)"
+          >
+            <span className="material-symbols-outlined text-[16px]">download</span>
+            <span>Export Rate Cards (PDF)</span>
+          </button>
+
           {/* Add New Clinic Primary Button */}
           <button
             type="button"

@@ -389,9 +389,6 @@ export const AdminView: React.FC<AdminViewProps> = ({ userRole }) => {
           <h2 className="font-display font-extrabold text-2xl text-slate-900 tracking-tight">
             Administration & Governance Center
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Manage user accounts, assign operational roles, configure accredited medical clinics, SAP contracts, and permissions.
-          </p>
         </div>
 
         {/* Global Stats Capsules */}

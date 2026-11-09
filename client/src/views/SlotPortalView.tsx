@@ -465,39 +465,51 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-slate-50">
-      {/* 1. Portal Top Navigation Bar */}
-      <div className="bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0 shadow-2xs">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 font-display font-extrabold text-slate-900 text-base">
-            <span className="material-symbols-outlined text-secondary text-[22px]">calendar_month</span>
-            <span>Medical Slot Portal</span>
+    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-5 bg-[#F3F5F7] min-h-screen">
+      {/* 1. Header with Title, Queue Counter & Action Buttons (Matching Page 2) */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-[22px] font-bold text-[#1B2430] tracking-tight">
+            {activeMenu === 'queue' && 'Allocation queue'}
+            {activeMenu === 'by-clinic' && 'Allocations by clinic'}
+            {activeMenu === 'price-comparison' && 'Price comparison'}
+          </h1>
+          <div className="text-xs text-[#5A6472] mt-0.5">
+            {activeMenu === 'queue' && 'Assign each slot request across clinics, starting with those expiring soon.'}
+            {activeMenu === 'by-clinic' && 'Pre-booked quota currently assigned to each approved clinic.'}
+            {activeMenu === 'price-comparison' && 'Compare agreed contract rates (SAR) across accredited partner clinics.'}
           </div>
-          <span className="text-slate-300">|</span>
-          <span className="text-xs text-slate-500 font-medium">
-            Central Medical Team Slot Allocation &amp; Clinic Dispatch
-          </span>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-1.5 bg-orange-50 border border-orange-200 px-3 py-1 rounded-xl text-xs font-semibold text-orange-800">
-            <span className="text-secondary font-normal">Console:</span>
-            <span className="font-bold">Central Medical Team</span>
-          </div>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {activeMenu === 'queue' && (
+            <span className="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-[#FDECD6] text-[#7A3A05]">
+              {queue.length} requests in queue
+            </span>
+          )}
+
+          <button
+            type="button"
+            onClick={loadQueueData}
+            disabled={loading}
+            className="p-2 text-slate-500 hover:text-slate-900 bg-white border border-[#DDE3E9] rounded-lg cursor-pointer shadow-2xs min-h-[44px] flex items-center justify-center"
+            title="Refresh Queue"
+          >
+            <span className={`material-symbols-outlined text-[18px] ${loading ? 'animate-spin' : ''}`}>refresh</span>
+          </button>
 
           <button
             type="button"
             onClick={handleExportSummary}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer"
+            className="px-3.5 py-2 bg-white border border-[#DDE3E9] hover:bg-slate-50 text-[#1B2430] rounded-lg text-xs font-semibold transition-all shadow-2xs cursor-pointer min-h-[44px]"
           >
-            <span className="material-symbols-outlined text-[15px]">download</span>
-            <span>Export</span>
+            Export
           </button>
 
           <button
             type="button"
             onClick={() => setIsPreBookModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-secondary hover:bg-secondary-hover text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer"
+            className="px-4 py-2 bg-secondary hover:bg-secondary-hover text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer min-h-[44px] flex items-center gap-1.5"
           >
             <span className="material-symbols-outlined text-[16px]">add_box</span>
             <span>+ Pre-Book Slots</span>
@@ -505,599 +517,349 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
         </div>
       </div>
 
+      {/* 2. Clean Pill Tabs */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setActiveMenu('queue')}
+          className={`px-4 py-2.5 rounded-lg text-[13px] font-semibold transition-all cursor-pointer min-h-[44px] flex items-center gap-2 ${
+            activeMenu === 'queue'
+              ? 'bg-[#0A0F1D] text-white shadow-xs'
+              : 'bg-white border border-[#DDE3E9] text-[#1B2430] hover:bg-slate-50'
+          }`}
+        >
+          <span>Allocation queue</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[11px] font-bold bg-[#D8F0E3] text-[#0B5132]">
+            {queue.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMenu('by-clinic')}
+          className={`px-4 py-2.5 rounded-lg text-[13px] font-semibold transition-all cursor-pointer min-h-[44px] ${
+            activeMenu === 'by-clinic'
+              ? 'bg-[#0A0F1D] text-white shadow-xs'
+              : 'bg-white border border-[#DDE3E9] text-[#1B2430] hover:bg-slate-50'
+          }`}
+        >
+          Allocations by clinic
+        </button>
+
+        {!isHrRole && (
+          <button
+            type="button"
+            onClick={() => setActiveMenu('price-comparison')}
+            className={`px-4 py-2.5 rounded-lg text-[13px] font-semibold transition-all cursor-pointer min-h-[44px] ${
+              activeMenu === 'price-comparison'
+                ? 'bg-[#0A0F1D] text-white shadow-xs'
+                : 'bg-white border border-[#DDE3E9] text-[#1B2430] hover:bg-slate-50'
+            }`}
+          >
+            Price comparison
+          </button>
+        )}
+      </div>
+
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-xl flex items-center gap-2.5 animate-in slide-in-from-bottom-2 duration-150 border border-slate-700">
+        <div className="fixed bottom-5 right-5 z-50 bg-[#0A0F1D] text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-xl flex items-center gap-2.5 animate-in slide-in-from-bottom-2 duration-150 border border-slate-700">
           <span className="material-symbols-outlined text-secondary text-[18px]">check_circle</span>
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* 2. Main Portal Body: Left Dark Sidebar + Right Content Area */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Left Dark Sidebar - Matches Expertise Dark Navy Theme */}
-        <div className="w-64 bg-[#0A0F1D] text-white flex flex-col justify-between p-4 border-r border-slate-800 shrink-0 select-none overflow-y-auto">
-          <div className="space-y-5">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-secondary text-[20px]">calendar_month</span>
-                <span className="font-display font-extrabold text-sm text-white tracking-wide">Medical Slot Portal</span>
-              </div>
-              <div className="text-[11px] text-slate-400 font-medium pl-7">
-                Expertise workforce
-              </div>
+      {/* 3. Main Views */}
+      {/* TAB 1: ALLOCATION QUEUE */}
+      {activeMenu === 'queue' && (
+        <div className="space-y-4">
+          {loading ? (
+            <div className="p-12 text-center text-xs text-[#5A6472] font-semibold bg-white rounded-xl border border-[#DDE3E9]">
+              Loading slot allocation requests from database...
             </div>
-
-            {/* Dropdown Selector */}
-            <div className="relative">
-              <select
-                value={selectedRoleView}
-                onChange={(e) => handleRoleViewChange(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs font-semibold rounded-lg px-3 py-2 pr-7 appearance-none focus:outline-none focus:border-secondary cursor-pointer"
-              >
-                <option value="Procurement central">Procurement central</option>
-                <option value="Central Medical Team">Central Medical Team</option>
-              </select>
-              <span className="material-symbols-outlined absolute right-2.5 top-2.5 text-slate-400 text-[16px] pointer-events-none">
-                expand_more
-              </span>
+          ) : queue.length === 0 ? (
+            <div className="p-12 text-center space-y-3 bg-white rounded-xl border border-[#DDE3E9]">
+              <div className="text-sm font-bold text-[#1B2430]">No Pending Slot Allocation Requests</div>
+              <p className="text-xs text-[#5A6472] max-w-sm mx-auto">
+                All pre-booked employee slots have been allocated across partner clinics.
+              </p>
             </div>
+          ) : (
+            queue.map((req) => {
+              const currentAllocated = getCardAllocatedSum(req.id);
+              const isFullyAllocated = currentAllocated === req.requestedSlots;
+              const isOverAllocated = currentAllocated > req.requestedSlots;
+              const currentRows = cardClinicRows[req.id] || [];
 
-            {/* Nav Menu Items */}
-            <nav className="space-y-1.5 pt-1">
-              <button
-                type="button"
-                onClick={() => setActiveMenu('queue')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  activeMenu === 'queue'
-                    ? 'bg-secondary/15 text-secondary border border-secondary/30 shadow-xs'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                }`}
-              >
-                <span>Allocation queue</span>
-                <span className="h-5 min-w-[20px] px-1.5 rounded-full bg-secondary text-white font-mono text-[10.5px] font-extrabold flex items-center justify-center">
-                  {queue.length}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveMenu('by-clinic')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  activeMenu === 'by-clinic'
-                    ? 'bg-secondary/15 text-secondary border border-secondary/30 shadow-xs'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                }`}
-              >
-                <span>Allocations by clinic</span>
-              </button>
-
-              {!isHrRole && (
-                <button
-                  type="button"
-                  onClick={() => setActiveMenu('price-comparison')}
-                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    activeMenu === 'price-comparison'
-                      ? 'bg-secondary/15 text-secondary border border-secondary/30 shadow-xs'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                  }`}
+              return (
+                <div
+                  key={req.id}
+                  className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs space-y-4 transition-all"
                 >
-                  <span>Price comparison</span>
-                </button>
-              )}
-            </nav>
-          </div>
-
-          {/* Quick Pre-Book Card in Sidebar */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 text-xs space-y-2 mt-4">
-            <div className="font-bold text-slate-200 flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-[16px] text-secondary">group_add</span>
-              <span>Need Slots for 50?</span>
-            </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Pre-book quota in advance when employee names are not yet decided.
-            </p>
-            <button
-              type="button"
-              onClick={() => setIsPreBookModalOpen(true)}
-              className="w-full py-1.5 bg-secondary hover:bg-secondary-hover text-white font-extrabold rounded-lg text-xs transition-colors shadow-sm cursor-pointer"
-            >
-              + Pre-Book 50 Slots
-            </button>
-          </div>
-        </div>
-
-        {/* Right Content Area */}
-        <div className="flex-1 overflow-y-auto p-6 lg:p-8">
-          {/* TAB 1: ALLOCATION QUEUE (CENTRAL MEDICAL TEAM VIEW) */}
-          {activeMenu === 'queue' && (
-            <div className="max-w-5xl mx-auto space-y-5">
-              {/* Header Title & Subtitle */}
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-2 gap-3 border-b border-slate-200/80">
-                <div>
-                  <h2 className="font-display font-extrabold text-2xl text-slate-900 tracking-tight">
-                    Allocation queue
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Click any slot request below to assign slots across different clinics or the same clinic using dropdowns.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {expiredCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowExpired(prev => !prev);
-                      }}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
-                        showExpired
-                          ? 'bg-amber-100 text-amber-900 border-amber-300'
-                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      <span className="material-symbols-outlined text-[15px]">
-                        {showExpired ? 'visibility_off' : 'visibility'}
+                  {/* Top Row: ID, Title, Dept Pill, requested / assigned summary */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <b className="text-[16px] text-[#1B2430] font-bold">{req.id}</b>
+                      <span className="text-[15px] font-semibold text-[#1B2430]">{req.title}</span>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-[#5A6472] border border-[#DDE3E9]">
+                        {req.department}
                       </span>
-                      <span>{showExpired ? `Hide Disappeared (${expiredCount})` : `Show ${expiredCount} Disappeared`}</span>
-                    </button>
-                  )}
-                  <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
-                    {queue.length} Requests in Queue
-                  </span>
-                  <button
-                    type="button"
-                    onClick={loadQueueData}
-                    disabled={loading}
-                    className="p-1.5 text-slate-500 hover:text-slate-900 bg-white border border-slate-200 rounded-lg cursor-pointer"
-                    title="Refresh Queue"
-                  >
-                    <span className={`material-symbols-outlined text-[18px] ${loading ? 'animate-spin' : ''}`}>refresh</span>
-                  </button>
-                </div>
-              </div>
-
-              {loading ? (
-                <div className="p-12 text-center text-xs text-slate-400 font-semibold bg-white rounded-2xl border border-slate-200">
-                  Loading slot allocation requests from database...
-                </div>
-              ) : queue.length === 0 ? (
-                <div className="p-12 text-center space-y-3 bg-white rounded-2xl border border-slate-200">
-                  <div className="text-sm font-bold text-slate-800">No Pending Slot Allocation Requests</div>
-                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                    All pre-booked employee slots have been allocated. Pre-book new capacity slots above.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {queue.map((req) => {
-                    const currentAllocated = getCardAllocatedSum(req.id);
-                    const isFullyAllocated = currentAllocated === req.requestedSlots;
-                    const isOverAllocated = currentAllocated > req.requestedSlots;
-                    const isSelected = selectedReqId === req.id;
-                    const currentRows = cardClinicRows[req.id] || [];
-
-                    return (
-                      <div
-                        key={req.id}
-                        onClick={() => setSelectedReqId(isSelected ? null : req.id)}
-                        className={`bg-white border rounded-2xl p-5 shadow-2xs space-y-4 transition-all cursor-pointer ${
-                          isSelected
-                            ? 'border-secondary ring-2 ring-secondary/20 shadow-xs'
-                            : 'border-slate-200 hover:border-slate-300'
-                        }`}
-                      >
-                        {/* 1. Header: Matches screenshot (SR-1007 Sadara Medical [PMTA] 10 slots requested) */}
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                          <div className="flex flex-wrap items-center gap-2.5">
-                            <span className="font-display font-extrabold text-slate-950 text-base">
-                              {req.id}
-                            </span>
-                            <span className="font-display font-bold text-slate-800 text-base">
-                              {req.title}
-                            </span>
-                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                              {req.department}
-                            </span>
-                            <span className="text-xs text-slate-500 font-medium">
-                              {req.requestedSlots} slots requested
-                            </span>
-                            <span className="px-2 py-0.5 rounded text-[10.5px] font-bold bg-orange-50 text-orange-800 border border-orange-200">
-                              {req.assignedSlots || 0}/{req.requestedSlots} assigned
-                            </span>
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10.5px] font-bold border flex items-center gap-1 ${
-                                req.isExpired
-                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                  : (req.daysRemaining !== undefined && req.daysRemaining <= 2)
-                                  ? 'bg-amber-100 text-amber-900 border-amber-300 animate-pulse'
-                                  : 'bg-slate-100 text-slate-700 border-slate-200'
-                              }`}
-                              title={`Configured in Admin: Pre-booked slots disappear in ${slotExpiryDays} days`}
-                            >
-                              <span className="material-symbols-outlined text-[12px]">
-                                {req.isExpired ? 'event_busy' : 'schedule'}
-                              </span>
-                              <span>{req.isExpired ? 'Disappeared / Expired' : `Disappears in ${req.daysRemaining ?? slotExpiryDays}d`}</span>
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            {req.needByDate && (
-                              <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
-                                Need-by: {new Date(req.needByDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
-                              </span>
-                            )}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setAssigningSlotId(req.id);
-                              }}
-                              className="px-2.5 py-1 bg-secondary hover:bg-secondary-hover text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1 cursor-pointer"
-                              title="Assign or view employees for this slot quota"
-                            >
-                              <span className="material-symbols-outlined text-[14px]">group</span>
-                              <span>Workforce ({req.assignedSlots || 0}/{req.requestedSlots})</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedReqId(isSelected ? null : req.id);
-                              }}
-                              className="text-xs text-secondary font-bold hover:underline flex items-center gap-0.5 cursor-pointer"
-                            >
-                              <span>{isSelected ? 'Less info' : 'Details'}</span>
-                              <span className="material-symbols-outlined text-[16px]">
-                                {isSelected ? 'expand_less' : 'expand_more'}
-                              </span>
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* 2. Clinic Columns Grid (EXACT MATCH TO SCREENSHOT WITH CLINIC DROPDOWNS) */}
-                        <div
-                          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {currentRows.map((row, colIndex) => {
-                            const selectedClinic = allClinics.find(c => c.id === row.vendorId);
-                            const displayName = selectedClinic ? selectedClinic.name : row.vendorId;
-
-                            return (
-                              <div key={colIndex} className="space-y-1.5">
-                                {/* Clinic Dropdown: User can choose other clinics */}
-                                <div className="relative">
-                                  <select
-                                    value={row.vendorId}
-                                    disabled={isHrRole}
-                                    onChange={(e) => handleUpdateRowClinic(req.id, colIndex, e.target.value)}
-                                    className="w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 pr-7 focus:outline-none focus:border-secondary focus:bg-white transition-all cursor-pointer truncate disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                    title="Choose clinic for this allocation column"
-                                  >
-                                    {allClinics.map((c) => (
-                                      <option key={c.id} value={c.id}>
-                                        {c.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <span className="material-symbols-outlined absolute right-1.5 top-1.5 text-slate-400 text-[16px] pointer-events-none">
-                                    expand_more
-                                  </span>
-                                </div>
-
-                                {/* Slot Number Input (Matches screenshot [ 10 ] [ 0 ] etc.) */}
-                                <div className="relative">
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max={req.requestedSlots}
-                                    value={row.slots}
-                                    disabled={isHrRole}
-                                    onChange={(e) => handleUpdateRowSlots(req.id, colIndex, e.target.value)}
-                                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-secondary focus:ring-1 focus:ring-secondary/20 transition-all text-left disabled:bg-slate-50 disabled:cursor-not-allowed"
-                                  />
-                                </div>
-
-                                {/* Quick Shortcuts when Central Team clicks/focuses */}
-                                {isCentralOrAdmin && (
-                                  <div className="flex items-center justify-between text-[10px] text-slate-400 px-1 pt-0.5">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleAssignAllToThisColumn(req.id, colIndex, req.requestedSlots)}
-                                      className="hover:text-secondary font-semibold hover:underline cursor-pointer"
-                                      title="Assign 100% of the requested slots to this clinic"
-                                    >
-                                      All {req.requestedSlots} here
-                                    </button>
-                                    {currentRows.length > 2 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRemoveClinicRow(req.id, colIndex)}
-                                        className="hover:text-red-600 cursor-pointer"
-                                        title="Remove this clinic column"
-                                      >
-                                        Remove
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        {/* 3. Bottom Action Bar: Pill + Confirm allocation + Split evenly */}
-                        <div
-                          className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {/* Left: Status Pill (Exact match to screenshot pills) */}
-                          <div className="flex items-center gap-2">
-                            {isOverAllocated ? (
-                              <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-[#FEE2E2] text-[#991B1B] border border-red-200">
-                                <span className="h-2 w-2 rounded-full bg-red-600"></span>
-                                <span>Over-allocated: {currentAllocated} of {req.requestedSlots}</span>
-                              </span>
-                            ) : isFullyAllocated ? (
-                              <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-[#DCFCE7] text-[#166534] border border-emerald-200">
-                                <span className="h-2 w-2 rounded-full bg-emerald-600"></span>
-                                <span>{currentAllocated} of {req.requestedSlots} allocated</span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-[#FEF3C7] text-[#92400E] border border-amber-200">
-                                <span className="h-2 w-2 rounded-full bg-amber-600"></span>
-                                <span>{currentAllocated} of {req.requestedSlots} allocated</span>
-                              </span>
-                            )}
-
-                            {isCentralOrAdmin && (
-                              <button
-                                type="button"
-                                onClick={() => handleAddClinicRow(req.id)}
-                                className="text-[11px] font-bold text-slate-500 hover:text-secondary flex items-center gap-0.5 px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
-                                title="Add another clinic column"
-                              >
-                                <span className="material-symbols-outlined text-[14px]">add</span>
-                                <span>Add Clinic</span>
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Right: Confirm Allocation + Split Evenly buttons */}
-                          {isCentralOrAdmin && (
-                            <div className="flex items-center gap-2.5">
-                              <button
-                                type="button"
-                                onClick={() => handleConfirmAllocation(req)}
-                                className="bg-secondary hover:bg-secondary-hover text-white font-bold text-xs px-4 py-2 rounded-lg transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
-                              >
-                                <span className="material-symbols-outlined text-[15px]">check_circle</span>
-                                <span>Confirm allocation</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => handleSplitEvenly(req)}
-                                className="bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs px-4 py-2 rounded-lg border border-slate-300 transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
-                              >
-                                <span className="material-symbols-outlined text-[15px]">balance</span>
-                                <span>Split evenly</span>
-                              </button>
-                            </div>
-                          )}
-
-                          {isHrRole && (
-                            <span className="text-xs text-slate-400 italic">
-                              Clinic quotas confirmed and dispatched by Central Medical Team
-                            </span>
-                          )}
-                        </div>
-
-                        {/* 4. Collapsible Details Drawer */}
-                        {isSelected && (
-                          <div
-                            className="pt-2 border-t border-slate-100 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-3 animate-in fade-in duration-100"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                              {req.plant && (
-                                <span>Facility: <strong className="text-slate-700">{req.plant}</strong></span>
-                              )}
-                              {req.needByDate && (
-                                <span>Need-By: <strong className="text-slate-700">{new Date(req.needByDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</strong></span>
-                              )}
-                              <span>Requested by: <strong className="text-slate-700">{req.createdByName || 'HR Coordinator'}</strong></span>
-                              {req.note && (
-                                <span className="italic text-slate-400">Note: &quot;{req.note}&quot;</span>
-                              )}
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => setSelectedReqId(null)}
-                              className="text-[11px] text-slate-400 hover:text-slate-600 underline cursor-pointer"
-                            >
-                              Close details
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 2: ALLOCATIONS BY CLINIC */}
-          {activeMenu === 'by-clinic' && (
-            <div className="max-w-5xl mx-auto space-y-5">
-              <div>
-                <h2 className="font-display font-extrabold text-2xl text-slate-900 tracking-tight">
-                  Allocations by clinic
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  Active pre-booked quota assigned to approved medical centers.
-                </p>
-              </div>
-
-              {clinicLoading ? (
-                <div className="p-12 text-center text-xs text-slate-400 font-semibold bg-white rounded-2xl border border-slate-200">
-                  Loading clinic breakdown...
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {clinicSummaries.map((clinic) => (
-                    <div
-                      key={clinic.id}
-                      className="bg-white border border-slate-200 rounded-2xl p-5 shadow-2xs space-y-4 hover:border-slate-300 transition-all"
-                    >
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-display font-bold text-base text-slate-900">{clinic.name}</h3>
-                            <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">
-                              {clinic.code}
-                            </span>
-                          </div>
-                          <div className="text-xs text-slate-400 mt-0.5">
-                            CR: {clinic.crNumber || '2051028391'} &bull; SAP Vendor: {clinic.sapVendorNo || '1001502'}
-                          </div>
-                        </div>
-
-                        <div className="text-right">
-                          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Total Slots</span>
-                          <span className="font-display font-extrabold text-2xl text-secondary">
-                            {clinic.totalAllocatedSlots}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Active Allocations List */}
-                      <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                        <span className="text-[10.5px] uppercase font-bold text-slate-400 tracking-wider">
-                          Active Reservations ({clinic.allocationsCount})
+                      {req.daysRemaining !== undefined && (
+                        <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-[#FDECD6] text-[#7A3A05]">
+                          Disappears in {req.daysRemaining}d
                         </span>
-                        {clinic.allocations.length === 0 ? (
-                          <div className="text-xs text-slate-400 italic py-1">No slots allocated yet</div>
-                        ) : (
-                          clinic.allocations.map((alloc: any, idx: number) => (
-                            <div
-                              key={idx}
-                              className="flex items-center justify-between p-2 rounded-lg bg-slate-50 text-xs"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono font-bold text-slate-800">{alloc.slotRequestId}</span>
-                                <span className="font-semibold text-slate-700">{alloc.testName}</span>
-                                <span className="text-[10px] px-1.5 py-0.2 rounded bg-white border border-slate-200 text-slate-600">
-                                  {alloc.department}
-                                </span>
-                              </div>
-                              <span className="font-mono font-bold text-primary">
-                                {alloc.allocatedSlots} slots
-                              </span>
-                            </div>
-                          ))
-                        )}
-                      </div>
+                      )}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+                    <div className="text-xs text-[#5A6472]">
+                      {req.requestedSlots} slots requested &bull; {req.assignedSlots || 0}/{req.requestedSlots} assigned &bull; Need-by {req.needByDate ? new Date(req.needByDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '20 Nov'}
+                    </div>
+                  </div>
 
-          {/* TAB 3: PRICE COMPARISON */}
-          {activeMenu === 'price-comparison' && (
-            <div className="max-w-5xl mx-auto space-y-5">
-              <div>
-                <h2 className="font-display font-extrabold text-2xl text-slate-900 tracking-tight">
-                  Price comparison matrix
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  Compare agreed contract rates (SAR) across clinics to optimize quota allocation and cost savings.
-                </p>
-              </div>
+                  {/* Clinic Input Grid (Matching Page 2 prototype: .cl) */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 pt-1">
+                    {currentRows.map((row, colIndex) => {
+                      const clinicObj = allClinics.find(c => c.id === row.vendorId);
+                      return (
+                        <div key={colIndex} className="space-y-1">
+                          <label className="block text-xs font-semibold text-[#1B2430] truncate" title={clinicObj?.name}>
+                            {clinicObj?.name || `Clinic ${colIndex + 1}`}
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            max={req.requestedSlots}
+                            value={row.slots}
+                            onChange={(e) => handleUpdateRowSlots(req.id, colIndex, e.target.value)}
+                            className="w-full border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] font-bold text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary shadow-2xs"
+                          />
+                          <div className="flex items-center justify-between text-[10px] text-slate-400 px-1 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => handleAssignAllToThisColumn(req.id, colIndex, req.requestedSlots)}
+                              className="hover:text-secondary font-semibold hover:underline cursor-pointer"
+                              title="Assign 100% of the requested slots to this clinic"
+                            >
+                              All {req.requestedSlots} here
+                            </button>
+                            {currentRows.length > 2 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveClinicRow(req.id, colIndex)}
+                                className="hover:text-red-600 cursor-pointer"
+                                title="Remove this clinic column"
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
 
-              {priceLoading ? (
-                <div className="p-12 text-center text-xs text-slate-400 font-semibold bg-white rounded-2xl border border-slate-200">
-                  Loading contracted price comparison...
-                </div>
-              ) : (
-                <div className="bg-white border border-slate-200 rounded-2xl shadow-2xs overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-[#131B35] text-white uppercase text-[10.5px] font-bold tracking-wider">
-                        <tr>
-                          <th className="py-3 px-4">Test Protocol / Package</th>
-                          {priceData.clinics.map((c) => (
-                            <th key={c.id} className="py-3 px-3 text-center">
-                              <div>{c.name}</div>
-                              <div className="text-[9.5px] text-slate-400 font-mono font-normal">({c.code})</div>
-                            </th>
-                          ))}
-                          <th className="py-3 px-4 text-right">Optimal Rate</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-medium">
-                        {priceData.tests.map((test) => (
-                          <tr key={test.testId} className="hover:bg-slate-50/70 transition-colors">
-                            <td className="py-3 px-4">
-                              <div className="font-bold text-slate-900">{test.testName}</div>
-                              <div className="text-[10.5px] text-slate-400 font-mono">SAP Code: {test.testId}</div>
-                            </td>
+                  {/* Bottom Action Bar: Status Pill + Actions (Matching Page 2 prototype) */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#EEF1F4]">
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
+                        isFullyAllocated
+                          ? 'bg-[#D8F0E3] text-[#0B5132]'
+                          : isOverAllocated
+                          ? 'bg-[#FBE0DD] text-[#912018]'
+                          : 'bg-[#FDECD6] text-[#7A3A05]'
+                      }`}>
+                        {currentAllocated} of {req.requestedSlots} allocated
+                      </span>
 
-                            {priceData.clinics.map((c) => {
-                              const rate = test.rates[c.id];
-                              const isLowest = rate && rate === test.lowestRate;
+                      {isCentralOrAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => handleAddClinicRow(req.id)}
+                          className="text-xs font-semibold text-slate-500 hover:text-secondary flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
+                          title="Add another clinic column"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">add</span>
+                          <span>Add Clinic</span>
+                        </button>
+                      )}
+                    </div>
 
-                              return (
-                                <td key={c.id} className="py-3 px-3 text-center font-mono">
-                                  {rate ? (
-                                    <span
-                                      className={`inline-block px-2 py-0.5 rounded ${
-                                        isLowest
-                                          ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300'
-                                          : 'text-slate-700'
-                                      }`}
-                                    >
-                                      SAR {rate.toFixed(2)}
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-300">—</span>
-                                  )}
-                                </td>
-                              );
-                            })}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSplitEvenly(req)}
+                        className="px-4 py-2 bg-white border border-[#DDE3E9] hover:bg-slate-50 text-[#1B2430] rounded-lg text-xs font-semibold transition-all min-h-[40px] cursor-pointer shadow-2xs"
+                      >
+                        Split evenly
+                      </button>
 
-                            <td className="py-3 px-4 text-right font-mono">
-                              {test.lowestRate ? (
-                                <div>
-                                  <span className="font-bold text-secondary text-sm">
-                                    SAR {test.lowestRate.toFixed(2)}
-                                  </span>
-                                  <div className="text-[10px] text-slate-400 truncate">
-                                    {test.lowestClinicName}
-                                  </div>
-                                </div>
-                              ) : (
-                                '—'
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                      <button
+                        type="button"
+                        onClick={() => setAssigningSlotId(req.id)}
+                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-semibold transition-all min-h-[40px] cursor-pointer"
+                        title="View and assign workforce to this quota"
+                      >
+                        Workforce ({req.assignedSlots || 0}/{req.requestedSlots})
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmAllocation(req)}
+                        className="px-4 py-2 bg-secondary hover:bg-secondary-hover text-white rounded-lg text-xs font-semibold transition-all min-h-[40px] shadow-xs cursor-pointer"
+                      >
+                        Confirm allocation
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Card Footer */}
+                  <div className="text-xs text-[#5A6472] pt-2 border-t border-[#EEF1F4]">
+                    Facility: {req.plant || 'Sadara Complex (Jubail)'} &bull; Requested by System Administrator {req.note && `&bull; Note: "${req.note}"`}
                   </div>
                 </div>
-              )}
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* TAB 2: ALLOCATIONS BY CLINIC (Matching Page 3) */}
+      {activeMenu === 'by-clinic' && (
+        <div>
+          {clinicLoading ? (
+            <div className="p-12 text-center text-xs text-[#5A6472] font-semibold bg-white rounded-xl border border-[#DDE3E9]">
+              Loading clinic breakdown...
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {clinicSummaries.map((clinic) => (
+                <div
+                  key={clinic.id || clinic.code}
+                  className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs space-y-3"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <b className="text-[16px] text-[#1B2430] font-bold block">{clinic.name}</b>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-[#5A6472] font-mono border border-[#DDE3E9]">
+                          {clinic.code}
+                        </span>
+                        <span className="text-xs text-[#5A6472]">
+                          Active reservations: {clinic.allocationsCount ?? (clinic.allocations?.length || 0)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <div className="text-xs text-[#5A6472]">Total slots</div>
+                      <div className="text-[28px] font-bold text-primary leading-tight">
+                        {clinic.totalAllocatedSlots ?? 0}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Active Allocations List */}
+                  <div className="divide-y divide-[#EEF1F4] pt-2 border-t border-[#EEF1F4]">
+                    {(!clinic.allocations || clinic.allocations.length === 0) ? (
+                      <div className="text-xs text-[#5A6472] italic py-2">No active reservations assigned yet</div>
+                    ) : (
+                      clinic.allocations.map((alloc, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between py-2 text-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-[#1B2430]">{alloc.slotRequestId || `SR-${1007 + idx}`}</span>
+                            <span className="text-[#5A6472]">{alloc.testName || 'Sadara medical test'}</span>
+                          </div>
+                          <b className="text-[#1B2430]">
+                            {alloc.allocatedSlots} slots
+                          </b>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
-      </div>
+      )}
+
+      {/* TAB 3: PRICE COMPARISON */}
+      {activeMenu === 'price-comparison' && (
+        <div className="bg-white border border-[#DDE3E9] rounded-xl shadow-2xs overflow-hidden">
+          {priceLoading ? (
+            <div className="p-12 text-center text-xs text-[#5A6472] font-semibold">
+              Loading contracted price comparison...
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-[#131B35] text-white uppercase text-[10.5px] font-bold tracking-wider">
+                  <tr>
+                    <th className="py-3 px-4">Test Protocol / Package</th>
+                    {priceData.clinics.map((c) => (
+                      <th key={c.id} className="py-3 px-3 text-center">
+                        <div>{c.name}</div>
+                        <div className="text-[9.5px] text-slate-400 font-mono font-normal">({c.code})</div>
+                      </th>
+                    ))}
+                    <th className="py-3 px-4 text-right">Optimal Rate</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#EEF1F4] font-medium">
+                  {priceData.tests.map((test) => (
+                    <tr key={test.testId} className="hover:bg-slate-50/70 transition-colors">
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-[#1B2430]">{test.testName}</div>
+                        <div className="text-[10.5px] text-[#5A6472] font-mono">SAP Code: {test.testId}</div>
+                      </td>
+
+                      {priceData.clinics.map((c) => {
+                        const rate = test.rates[c.id];
+                        const isLowest = rate && rate === test.lowestRate;
+
+                        return (
+                          <td key={c.id} className="py-3 px-3 text-center font-mono">
+                            {rate ? (
+                              <span
+                                className={`inline-block px-2 py-0.5 rounded ${
+                                  isLowest
+                                    ? 'bg-[#D8F0E3] text-[#0B5132] font-bold'
+                                    : 'text-[#1B2430]'
+                                }`}
+                              >
+                                SAR {rate.toFixed(2)}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">&mdash;</span>
+                            )}
+                          </td>
+                        );
+                      })}
+
+                      <td className="py-3 px-4 text-right font-mono">
+                        {test.lowestRate ? (
+                          <div>
+                            <span className="font-bold text-secondary text-sm">
+                              SAR {test.lowestRate.toFixed(2)}
+                            </span>
+                            <div className="text-[10px] text-[#5A6472] truncate">
+                              {test.lowestClinicName}
+                            </div>
+                          </div>
+                        ) : (
+                          '&mdash;'
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 3. Pre-Book Advance Slots Modal (For HR or Central Team) */}
       {isPreBookModalOpen && (

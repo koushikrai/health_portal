@@ -75,7 +75,6 @@ export const InvoiceClearanceView: React.FC = () => {
           </div>
           <div>
             <h2 className="font-display font-extrabold text-xl text-slate-900">Finance Invoice Clearance & 3-Way Match</h2>
-            <p className="text-xs text-slate-500">Reconcile clinic billing against contracted SAP material rates and completed medical reports</p>
           </div>
         </div>
 

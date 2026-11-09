@@ -856,7 +856,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
   };
 
   return (
-    <div className="p-3 sm:p-4 lg:p-5 max-w-[1780px] mx-auto space-y-5">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-[1780px] mx-auto space-y-5 bg-[#F3F5F7] min-h-screen">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-bold flex items-center justify-between shadow-sm animate-fade-in">
@@ -870,215 +870,77 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
         </div>
       )}
 
-      {/* 1. TOP HEADER & PLANT FILTER BAR */}
-      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        {/* Left: Brand Identity + Subtitle */}
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-secondary/10 text-secondary flex items-center justify-center shrink-0">
-            <span className="material-symbols-outlined text-[24px]">medical_services</span>
-          </div>
-          <div>
-            <h1 className="font-display font-extrabold text-base lg:text-lg text-slate-900 leading-tight">
-              Occupational Health & Medical Clearance
-            </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Enterprise Employee Screening & Clinic Dispatch Console
-            </p>
+      {/* 1. TOP HEADER & PLANT FILTER TABS (Matching Page 5) */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-[22px] font-bold text-[#1B2430] tracking-tight">
+            Medical clearance requests
+          </h1>
+          <div className="text-xs text-[#5A6472] mt-0.5">
+            Review each batch, then assign employees to a clinic
           </div>
         </div>
 
-        {/* Industrial Plant Segmented Tabs */}
-        <div className="flex items-center flex-wrap p-1 rounded-xl bg-slate-100 border border-slate-200 text-xs shrink-0">
-          <button
-            type="button"
-            onClick={() => setSelectedPlant('ALL')}
-            className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-              selectedPlant === 'ALL'
-                ? 'bg-white text-slate-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            All Industrial Plants
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedPlant('YANPET')}
-            className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer whitespace-nowrap ${
-              selectedPlant === 'YANPET'
-                ? 'bg-white text-slate-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Yanpet Petrochemical
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedPlant('SABIC')}
-            className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer whitespace-nowrap ${
-              selectedPlant === 'SABIC'
-                ? 'bg-white text-slate-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            SABIC Jubail
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedPlant('SADARA')}
-            className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer whitespace-nowrap ${
-              selectedPlant === 'SADARA'
-                ? 'bg-white text-slate-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Sadara Complex
-          </button>
+        {/* Industrial Plant Tabs */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {[
+            { id: 'ALL', label: 'All plants' },
+            { id: 'YANPET', label: 'Yanpet' },
+            { id: 'SABIC', label: 'SABIC Jubail' },
+            { id: 'SADARA', label: 'Sadara' }
+          ].map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setSelectedPlant(p.id as any)}
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer min-h-[40px] ${
+                selectedPlant === p.id
+                  ? 'bg-[#0A0F1D] text-white shadow-xs'
+                  : 'bg-white border border-[#DDE3E9] text-[#1B2430] hover:bg-slate-50'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* 2. TELEMETRY / KPI ROW (5 CARDS) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
-        {/* Card 1: ACTIVE BATCHES */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-3.5 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Active Batches
-            </span>
+      {/* 2. 4 TOP KPI SUMMARY CARDS (Matching Page 5) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {/* Card 1: Active batches */}
+        <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+          <div className="text-xs text-[#5A6472] font-medium">Active batches</div>
+          <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+            {telemetry.activeBatches}
           </div>
-          <div className="flex items-end justify-between gap-2 my-1.5">
-            <div>
-              <span className="font-display font-extrabold text-2xl text-slate-900 leading-none">
-                {telemetry.activeBatches}
-              </span>
-              <span className="text-xs text-slate-500 font-bold ml-1.5">Batches</span>
-            </div>
-            <Sparkline
-              color="#0f766e"
-              gradientId="grad-active-batches"
-              linePath="M 0 26 C 15 26, 25 21, 40 21 C 55 21, 65 24, 75 16 C 85 9, 93 7, 100 7"
-              areaPath="M 0 26 C 15 26, 25 21, 40 21 C 55 21, 65 24, 75 16 C 85 9, 93 7, 100 7 L 100 36 L 0 36 Z"
-              endX={100}
-              endY={7}
-            />
-          </div>
-          <p className="text-[11px] text-slate-500 truncate">
-            Yanpet, Sadara, SABIC 100% active
-          </p>
+          <div className="text-xs text-[#5A6472]">Yanpet, Sadara, SABIC</div>
         </div>
 
-        {/* Card 2: EMPLOYEES REQUESTED */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-3.5 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Employees Requested
-            </span>
+        {/* Card 2: Employees requested */}
+        <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+          <div className="text-xs text-[#5A6472] font-medium">Employees requested</div>
+          <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+            {telemetry.totalEmployees}
           </div>
-          <div className="flex items-end justify-between gap-2 my-1.5">
-            <div>
-              <span className="font-display font-extrabold text-2xl text-slate-900 leading-none">
-                {telemetry.totalEmployees}
-              </span>
-            </div>
-            <Sparkline
-              color="#0284c7"
-              gradientId="grad-emp-req"
-              linePath="M 0 28 C 15 28, 25 24, 40 20 C 55 16, 65 18, 75 13 C 85 8, 92 6, 100 6"
-              areaPath="M 0 28 C 15 28, 25 24, 40 20 C 55 16, 65 18, 75 13 C 85 8, 92 6, 100 6 L 100 36 L 0 36 Z"
-              endX={100}
-              endY={6}
-            />
-          </div>
-          <div className="flex items-center justify-between text-[11px] text-slate-500">
-            <span>Across {telemetry.departmentsCount} business departments</span>
-            <span className="font-bold text-slate-700">14 Shifts</span>
-          </div>
+          <div className="text-xs text-[#5A6472]">across {telemetry.departmentsCount} departments</div>
         </div>
 
-        {/* Card 3: ASSIGNED PROGRESS */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-3.5 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Assigned Progress
-            </span>
+        {/* Card 3: Assigned */}
+        <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+          <div className="text-xs text-[#5A6472] font-medium">Assigned</div>
+          <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+            {telemetry.assignedTotal} <span className="text-sm font-semibold text-[#5A6472]">({telemetry.assignedPercent}%)</span>
           </div>
-          <div className="flex items-end justify-between gap-2 my-1.5">
-            <div>
-              <span className="font-display font-extrabold text-2xl text-slate-900 leading-none">
-                {telemetry.assignedTotal}
-              </span>
-              <span className="text-xs text-slate-500 font-semibold ml-1.5">({telemetry.assignedPercent}%)</span>
-            </div>
-            <Sparkline
-              color="#16a34a"
-              gradientId="grad-assigned-prog"
-              linePath="M 0 30 C 15 30, 25 25, 40 22 C 55 19, 68 12, 80 9 C 90 6, 95 5, 100 5"
-              areaPath="M 0 30 C 15 30, 25 25, 40 22 C 55 19, 68 12, 80 9 C 90 6, 95 5, 100 5 L 100 36 L 0 36 Z"
-              endX={100}
-              endY={5}
-            />
-          </div>
-          <div className="flex items-center justify-between text-[11px] text-slate-500">
-            <span>&bull; Awaiting allocation</span>
-            <span className="text-slate-700 font-medium">Target: today</span>
-          </div>
+          <div className="text-xs text-[#5A6472]">awaiting allocation</div>
         </div>
 
-        {/* Card 4: PENDING ASSIGNMENT */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-3.5 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Pending Assignment
-            </span>
+        {/* Card 4: Pending assignment */}
+        <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+          <div className="text-xs text-[#5A6472] font-medium">Pending assignment</div>
+          <div className="text-[28px] font-bold text-[#B45309] my-1 leading-tight tracking-tight">
+            {telemetry.pendingTotal}
           </div>
-          <div className="flex items-end justify-between gap-2 my-1.5">
-            <div>
-              <span className="font-display font-extrabold text-2xl text-slate-900 leading-none">
-                {telemetry.pendingTotal}
-              </span>
-              <span className="text-xs text-slate-500 font-bold ml-1.5">Left</span>
-            </div>
-            <Sparkline
-              color="#f59e0b"
-              gradientId="grad-pending-assign"
-              linePath="M 0 7 C 15 7, 25 11, 40 14 C 55 17, 65 19, 75 24 C 85 29, 93 29, 100 29"
-              areaPath="M 0 7 C 15 7, 25 11, 40 14 C 55 17, 65 19, 75 24 C 85 29, 93 29, 100 29 L 100 36 L 0 36 Z"
-              endX={100}
-              endY={29}
-            />
-          </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">
-              &Delta; 1 Card Expiring &le;60d
-            </span>
-            <span className="text-slate-500 font-bold">High Priority</span>
-          </div>
-        </div>
-
-        {/* Card 5: CENTER QUOTAS */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-3.5 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Center Quotas
-            </span>
-          </div>
-          <div className="my-1.5 space-y-1 text-[11px] text-slate-600">
-            <div className="flex items-center justify-between">
-              <span className="truncate">Badr Al Khaleej</span>
-              <span className="font-mono font-bold text-slate-900">{telemetry.quotas.bak}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="truncate">Gulf Asian Medical</span>
-              <span className="font-mono font-bold text-slate-900">{telemetry.quotas.gamc}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="truncate">Jubail Medical Ctr</span>
-              <span className="font-mono font-bold text-slate-900">{telemetry.quotas.jmc}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="truncate">Arrazi / Dina Med</span>
-              <span className="font-mono font-bold text-slate-900">{telemetry.quotas.arzDina}</span>
-            </div>
-          </div>
+          <div className="text-xs text-[#5A6472]">1 card expiring within 60 days</div>
         </div>
       </div>
 

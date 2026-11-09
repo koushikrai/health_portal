@@ -1082,9 +1082,6 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[11px] text-slate-400 font-medium">License: MOH #{currentClinic.crNumber}</span>
-              </div>
-              <div className="flex items-center gap-2 mt-1">
                 <h1 className="font-display font-extrabold text-xl text-slate-900 leading-tight">
                   {currentClinic.name}
                 </h1>
@@ -1105,9 +1102,6 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Location: {currentClinic.location} &bull; SAP Vendor ID: {currentClinic.sapVendorNo} &bull; Contract: {currentClinic.contractNo}
-              </p>
             </div>
           </div>
 
@@ -1170,28 +1164,6 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
           </div>
         </div>
 
-        {/* 2. LIVE OCCUPATIONAL HEALTH GATEWAY TELEMETRY RIBBON */}
-        <div className="pt-4 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div>
-            <h2 className="font-bold text-slate-800 text-sm">Live Occupational Health Gateway</h2>
-            <p className="text-slate-500 text-[11.5px] mt-0.5">
-              Target Sync Endpoints:{' '}
-              <span className="font-semibold text-primary">Yanpet Petrochemical (ERP-v9)</span>,{' '}
-              <span className="text-slate-700">SABIC Global HR</span>,{' '}
-              <span className="text-slate-700">Sadara GatePass Services</span>
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => alert(`Audit Stream: Active 2-way TLS stream to ${currentClinic.name}. Connected database records: ${requests.length}. Gateway latency: 18ms.`)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-primary font-semibold transition-colors cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[16px]">terminal</span>
-              <span>Audit Stream</span>
-            </button>
-          </div>
-        </div>
 
         {/* 3. LIVE EXECUTIVE METRICS STRIP (100% Dynamically Calculated from Database) */}
         <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1536,23 +1508,10 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-4">
               {/* Header */}
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-3 border-b border-slate-100">
-                <div className="flex items-start gap-3">
-                  <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
-                    <span className="material-symbols-outlined text-[22px]">inventory_2</span>
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-md bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider">
-                        Top Section: Bulk Upload
-                      </span>
-                      <h2 className="font-display font-extrabold text-base text-slate-900">
-                        Bulk Upload & Cohort Batch Queue
-                      </h2>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {currentClinic.name} &bull; Upload multi-candidate PDF reports matched automatically by 10-digit Iqama ID, segregated by intake request date.
-                    </p>
-                  </div>
+                <div>
+                  <h2 className="font-display font-extrabold text-base text-slate-900">
+                    Bulk Upload &amp; Cohort Batch Queue
+                  </h2>
                 </div>
 
                 {/* Actions & Bulk Search */}
@@ -1663,9 +1622,6 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                                 <span className="text-xs text-slate-500 font-medium">
                                   ({group.totalCount} Employees)
                                 </span>
-                              </div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">
-                                Segregated workforce clearance cohort sent for testing
                               </div>
                             </div>
                           </div>
