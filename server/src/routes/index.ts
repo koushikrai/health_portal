@@ -119,21 +119,21 @@ router.post(
 router.patch(
   '/requests/batch-assign',
   authenticate,
-  requireRole([Role.CENTRAL]),
+  requireRole([Role.CENTRAL, Role.ADMIN]),
   validateBody(batchAssignSchema),
   RequestsController.batchAssign
 );
 router.patch(
   '/requests/:id/schedule',
   authenticate,
-  requireRole([Role.CLINIC, Role.CENTRAL, Role.HR, Role.REQUESTER]),
+  requireRole([Role.CLINIC, Role.CENTRAL, Role.HR, Role.REQUESTER, Role.ADMIN]),
   validateBody(scheduleAppointmentSchema),
   RequestsController.scheduleAppointment
 );
 router.patch(
   '/requests/:id/cancel',
   authenticate,
-  requireRole([Role.HR, Role.REQUESTER, Role.CENTRAL]),
+  requireRole([Role.HR, Role.REQUESTER, Role.CENTRAL, Role.ADMIN]),
   RequestsController.cancel
 );
 router.patch(

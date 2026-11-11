@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { api } from '../../api/client';
 import { CertificateModal } from '../certificate/CertificateModal';
 import { PdfReportViewerModal } from '../certificate/PdfReportViewerModal';
@@ -310,6 +310,29 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
   const [invoiceNo, setInvoiceNo] = useState('');
   const [submittingInvoice, setSubmittingInvoice] = useState(false);
   const [invoiceSuccess, setInvoiceSuccess] = useState('');
+  const [invoiceGroupingMode, setInvoiceGroupingMode] = useState<'batch' | 'flat'>('batch');
+  const [expandedInvoiceBatches, setExpandedInvoiceBatches] = useState<Record<string, boolean>>({});
+  const [invoiceSearchQuery, setInvoiceSearchQuery] = useState('');
+  const [selectedInvoiceBatchFilter, setSelectedInvoiceBatchFilter] = useState<string>('ALL');
+  const [invoiceReqIdFilter, setInvoiceReqIdFilter] = useState<string>('');
+  const [invoiceTestFilter, setInvoiceTestFilter] = useState<string>('ALL');
+  const [invoiceClinicFilter, setInvoiceClinicFilter] = useState<string>('ALL');
+
+  // Inbound Requests Filters
+  const [inboundReqIdFilter, setInboundReqIdFilter] = useState<string>('');
+  const [inboundTestFilter, setInboundTestFilter] = useState<string>('ALL');
+  const [inboundClinicFilter, setInboundClinicFilter] = useState<string>('ALL');
+  const [inboundStatusFilter, setInboundStatusFilter] = useState<string>('ALL');
+  const [inboundSearchQuery, setInboundSearchQuery] = useState<string>('');
+
+  // Clinic Slot Scheduler State
+  const [schedulerDateFilter, setSchedulerDateFilter] = useState<'ALL' | 'TODAY' | 'TOMORROW' | 'WEEK' | 'CUSTOM'>('ALL');
+  const [schedulerCustomDate, setSchedulerCustomDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [schedulerStatusFilter, setSchedulerStatusFilter] = useState<'ALL' | 'SCHEDULED' | 'PENDING' | 'COMPLETED'>('ALL');
+  const [schedulerSearch, setSchedulerSearch] = useState<string>('');
+  const [schedulerViewMode, setSchedulerViewMode] = useState<'shifts' | 'list'>('shifts');
+  const [apptShift, setApptShift] = useState<string>('Morning (08:00 - 12:00)');
+  const [apptNote, setApptNote] = useState<string>('');
 
   // Official Certificate Modal
   const [selectedCertificate, setSelectedCertificate] = useState<any>(null);
@@ -378,6 +401,18 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
   useEffect(() => {
     loadClinicData(selectedVendorId);
     setInvoiceNo(`${currentClinic.code || 'INV'}-2026-${String(Math.floor(100 + Math.random() * 900))}`);
+    setSelectedInvoiceBatchFilter('ALL');
+    setInvoiceSearchQuery('');
+    setInvoiceReqIdFilter('');
+    setInvoiceTestFilter('ALL');
+    setInvoiceClinicFilter(selectedVendorId || 'ALL');
+    setBillableRequests([]);
+    // Inbound filters reset
+    setInboundReqIdFilter('');
+    setInboundTestFilter('ALL');
+    setInboundClinicFilter(selectedVendorId || 'ALL');
+    setInboundStatusFilter('ALL');
+    setInboundSearchQuery('');
   }, [selectedVendorId, currentClinic.code]);
 
   const loadClinicData = async (vId = selectedVendorId) => {
@@ -545,8 +580,8 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
         name: emp.name || 'Worker',
         initials,
         avatarUrl: emp.photoUrl || undefined,
-        roleDept: `#${emp.employeeNo || r.id} • ${emp.position || r.department || 'Logistics'}`,
-        deptFull: `${r.department || emp.division || 'LOGISTICS'} • ${emp.position || 'Heavy Fleet'}`,
+        roleDept: `#${emp.employeeNo || r.id} • ${emp.position || r.department || emp.department || 'Logistics'}`,
+        deptFull: `${r.department || emp.department || emp.division || 'LOGISTICS'} • ${emp.position || emp.jobDesc || 'Staff'}`,
         company: emp.division?.includes('Yanpet') ? 'Yanpet Petrochem' : (emp.division || 'Yanpet Petrochem'),
         iqamaId: emp.iqamaId || emp.employeeNo || '—',
         bloodGroup: 'O+ POS',
@@ -632,18 +667,48 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
     return filteredCandidates.filter(c => isCandidateBulk(c));
   }, [filteredCandidates]);
 
-  // Bulk candidates filtered by bulk search input
+  // Bulk candidates filtered by bulk search input and dropdown filters
   const filteredBulkCandidates = useMemo(() => {
-    if (!bulkSearch.trim()) return bulkCandidates;
-    const q = bulkSearch.toLowerCase().trim();
-    return bulkCandidates.filter(c =>
-      c.name.toLowerCase().includes(q) ||
-      c.iqamaId.toLowerCase().includes(q) ||
-      c.employeeNo.toLowerCase().includes(q) ||
-      c.protocol.toLowerCase().includes(q) ||
-      (c.rawRequest?.note && c.rawRequest.note.toLowerCase().includes(q))
-    );
-  }, [bulkCandidates, bulkSearch]);
+    return bulkCandidates.filter(c => {
+      // 1. Search Query
+      if (bulkSearch.trim()) {
+        const q = bulkSearch.toLowerCase().trim();
+        const matches =
+          c.name.toLowerCase().includes(q) ||
+          c.iqamaId.toLowerCase().includes(q) ||
+          c.employeeNo.toLowerCase().includes(q) ||
+          c.protocol.toLowerCase().includes(q) ||
+          (c.rawRequest?.note && c.rawRequest.note.toLowerCase().includes(q));
+        if (!matches) return false;
+      }
+
+      // 2. Protocol Filter
+      if (oneByOneProtocolFilter !== 'ALL') {
+        const target = oneByOneProtocolFilter.trim().toLowerCase();
+        const candProto = (c.protocol || '').trim().toLowerCase();
+        if (candProto !== target) return false;
+      }
+
+      // 3. Department Filter
+      if (oneByOneDeptFilter !== 'ALL') {
+        const targetDept = oneByOneDeptFilter.trim().toLowerCase();
+        const candDept = `${c.deptFull || ''} ${c.roleDept || ''} ${c.rawRequest?.department || ''} ${c.rawRequest?.employee?.department || ''}`.toLowerCase();
+        if (!candDept.includes(targetDept)) return false;
+      }
+
+      // 4. Status Filter
+      if (oneByOneStatusFilter !== 'ALL') {
+        if (oneByOneStatusFilter === 'FIT' && c.fitStatus !== 'FIT') return false;
+        if (oneByOneStatusFilter === 'CONDITIONAL' && c.fitStatus !== 'CONDITIONAL') return false;
+        if (oneByOneStatusFilter === 'UNFIT' && c.fitStatus !== 'UNFIT') return false;
+        if (oneByOneStatusFilter === 'CERTIFIED' && !c.isCertified) return false;
+        if (oneByOneStatusFilter === 'PDF_READY' && (!c.pdfFileUrl || c.isCertified)) return false;
+        if (oneByOneStatusFilter === 'PENDING' && (c.isCertified || c.pdfFileUrl)) return false;
+      }
+
+      return true;
+    });
+  }, [bulkCandidates, bulkSearch, oneByOneProtocolFilter, oneByOneDeptFilter, oneByOneStatusFilter]);
 
   // Bulk candidates segregated together based on the date they were requested
   interface BulkDateGroup {
@@ -654,6 +719,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
     totalCount: number;
     doneCount: number;
     pendingCount: number;
+    unbilledCount: number;
   }
 
   const bulkDateGroups = useMemo(() => {
@@ -698,14 +764,20 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
           candidates: [],
           totalCount: 0,
           doneCount: 0,
-          pendingCount: 0
+          pendingCount: 0,
+          unbilledCount: 0
         };
       }
 
       groups[groupKey].candidates.push(c);
       groups[groupKey].totalCount++;
-      if (c.isCertified) {
+      const isDone = Boolean(c.isCertified || c.rawRequest?.status === 'COMPLETED' || c.rawRequest?.report);
+      const isBilled = Boolean(c.rawRequest?.invoiceItems && c.rawRequest.invoiceItems.length > 0);
+      if (isDone) {
         groups[groupKey].doneCount++;
+        if (!isBilled) {
+          groups[groupKey].unbilledCount++;
+        }
       } else {
         groups[groupKey].pendingCount++;
       }
@@ -719,6 +791,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
     const set = new Set<string>();
     candidates.forEach(c => {
       if (c.protocol && c.protocol.trim()) set.add(c.protocol.trim());
+      if (c.rawRequest?.test?.name && c.rawRequest.test.name.trim()) set.add(c.rawRequest.test.name.trim());
     });
     return Array.from(set).sort();
   }, [candidates]);
@@ -727,36 +800,45 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
   const availableDepartments = useMemo(() => {
     const set = new Set<string>();
     candidates.forEach(c => {
-      const dept = c.deptFull?.split('•')?.[0]?.trim() || c.roleDept?.split('•')?.[1]?.trim();
-      if (dept) set.add(dept);
+      const parts = (c.deptFull || '').split('•');
+      if (parts[0]?.trim()) set.add(parts[0].trim());
+      const roleParts = (c.roleDept || '').split('•');
+      if (roleParts[1]?.trim()) set.add(roleParts[1].trim());
+      if (c.rawRequest?.department?.trim()) set.add(c.rawRequest.department.trim());
+      if (c.rawRequest?.employee?.department?.trim()) set.add(c.rawRequest.employee.department.trim());
+      if (c.rawRequest?.employee?.division?.trim()) set.add(c.rawRequest.employee.division.trim());
     });
-    return Array.from(set).sort();
+    return Array.from(set).filter(Boolean).sort();
   }, [candidates]);
 
   // Candidates filtered for the "Choose One by One" bottom section
   const oneByOneFilteredCandidates = useMemo(() => {
     return candidates.filter((c) => {
       // 1. ID Search (Iqama ID, SAP Badge ID, Name, or Request ID)
-      if (oneByOneIdSearch.trim()) {
-        const q = oneByOneIdSearch.toLowerCase().trim();
-        const matchIqama = c.iqamaId?.toLowerCase().includes(q);
-        const matchBadge = c.employeeNo?.toLowerCase().includes(q);
-        const matchName = c.name?.toLowerCase().includes(q);
-        const matchId = c.id?.toLowerCase().includes(q);
-        if (!matchIqama && !matchBadge && !matchName && !matchId) {
+      const searchQuery = (oneByOneIdSearch || bulkSearch).trim().toLowerCase();
+      if (searchQuery) {
+        const matchIqama = c.iqamaId?.toLowerCase().includes(searchQuery);
+        const matchBadge = c.employeeNo?.toLowerCase().includes(searchQuery);
+        const matchName = c.name?.toLowerCase().includes(searchQuery);
+        const matchId = c.id?.toLowerCase().includes(searchQuery);
+        const matchProto = c.protocol?.toLowerCase().includes(searchQuery);
+        if (!matchIqama && !matchBadge && !matchName && !matchId && !matchProto) {
           return false;
         }
       }
 
       // 2. Protocol / Design Filter
       if (oneByOneProtocolFilter !== 'ALL') {
-        if (c.protocol !== oneByOneProtocolFilter) return false;
+        const target = oneByOneProtocolFilter.trim().toLowerCase();
+        const candProto = (c.protocol || '').trim().toLowerCase();
+        if (candProto !== target) return false;
       }
 
       // 3. Department / Designation Filter
       if (oneByOneDeptFilter !== 'ALL') {
-        const dept = c.deptFull?.split('•')?.[0]?.trim() || c.roleDept?.split('•')?.[1]?.trim() || '';
-        if (!dept.toLowerCase().includes(oneByOneDeptFilter.toLowerCase())) return false;
+        const targetDept = oneByOneDeptFilter.trim().toLowerCase();
+        const candDept = `${c.deptFull || ''} ${c.roleDept || ''} ${c.rawRequest?.department || ''} ${c.rawRequest?.employee?.department || ''}`.toLowerCase();
+        if (!candDept.includes(targetDept)) return false;
       }
 
       // 4. Status Filter
@@ -771,7 +853,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
 
       return true;
     });
-  }, [candidates, oneByOneIdSearch, oneByOneProtocolFilter, oneByOneDeptFilter, oneByOneStatusFilter]);
+  }, [candidates, oneByOneIdSearch, bulkSearch, oneByOneProtocolFilter, oneByOneDeptFilter, oneByOneStatusFilter]);
 
   const toggleDateGroup = (groupKey: string) => {
     setExpandedDateGroups((prev) => ({
@@ -1031,17 +1113,48 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
     }
   };
 
-  // Schedule appointment in Inbound tab
+  // Schedule appointment in Inbound tab / Slot Scheduler
   const handleScheduleAppt = async () => {
     if (!apptModalId || !apptDate) return;
     try {
-      await api.scheduleAppointment(apptModalId, apptDate);
+      const fullNote = apptNote.trim()
+        ? `[${apptShift}] ${apptNote.trim()}`
+        : `Shift: ${apptShift}`;
+      await api.scheduleAppointment(apptModalId, apptDate, fullNote);
       setApptModalId(null);
       setApptDate('');
+      setApptNote('');
       await loadClinicData(selectedVendorId);
     } catch (e: any) {
       alert(`Scheduling failed: ${e.response?.data?.error || e.message}`);
     }
+  };
+
+  const openScheduleModal = (req: any) => {
+    setApptModalId(req.id);
+    if (req.apptDate) {
+      try {
+        setApptDate(new Date(req.apptDate).toISOString().slice(0, 10));
+      } catch {
+        setApptDate(new Date().toISOString().slice(0, 10));
+      }
+    } else {
+      setApptDate(new Date().toISOString().slice(0, 10));
+    }
+    const note = req.note || '';
+    if (note.includes('Afternoon')) {
+      setApptShift('Afternoon (12:00 - 16:00)');
+    } else if (note.includes('Evening')) {
+      setApptShift('Evening (16:00 - 20:00)');
+    } else {
+      setApptShift('Morning (08:00 - 12:00)');
+    }
+    setApptNote(note.replace(/\[.*?\]\s*/g, '').replace(/Shift:\s*.*$/i, '').trim());
+  };
+
+  const handleDirectExamine = (req: any) => {
+    setActiveCandidateId(req.id);
+    setActiveSubTab('entry');
   };
 
   // Submit invoice in Invoice Clearance tab
@@ -1071,6 +1184,442 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
 
   const completedRequests = requests.filter(r => (r.status === 'COMPLETED' || r.report) && (!r.invoiceItems || r.invoiceItems.length === 0));
 
+  // Available screening tests / protocols across completed billable requests
+  const availableInvoiceTests = useMemo(() => {
+    const set = new Set<string>();
+    completedRequests.forEach(r => {
+      const name = r.test?.name?.trim();
+      if (name) set.add(name);
+    });
+    return Array.from(set).sort();
+  }, [completedRequests]);
+
+  // Available clinics tested across completed billable requests
+  const availableInvoiceClinics = useMemo(() => {
+    const map = new Map<string, { id: string; code: string; name: string }>();
+    clinics.forEach(c => map.set(c.id, c));
+    completedRequests.forEach(r => {
+      const vId = r.vendorId || r.vendor?.id;
+      if (vId && !map.has(vId) && r.vendor) {
+        map.set(vId, { id: vId, code: r.vendor.code || vId, name: r.vendor.name || vId });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.code.localeCompare(b.code));
+  }, [clinics, completedRequests]);
+
+  // Available screening tests / protocols across all inbound requests
+  const availableInboundTests = useMemo(() => {
+    const set = new Set<string>();
+    requests.forEach(r => {
+      const name = r.test?.name?.trim();
+      if (name) set.add(name);
+    });
+    return Array.from(set).sort();
+  }, [requests]);
+
+  // Available clinics across all inbound requests
+  const availableInboundClinics = useMemo(() => {
+    const map = new Map<string, { id: string; code: string; name: string }>();
+    clinics.forEach(c => map.set(c.id, c));
+    requests.forEach(r => {
+      const vId = r.vendorId || r.vendor?.id;
+      if (vId && !map.has(vId) && r.vendor) {
+        map.set(vId, { id: vId, code: r.vendor.code || vId, name: r.vendor.name || vId });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.code.localeCompare(b.code));
+  }, [clinics, requests]);
+
+  // Filtered inbound clearance requests
+  const filteredInboundRequests = useMemo(() => {
+    return requests.filter((r: any) => {
+      // 1. Req ID Filter
+      if (inboundReqIdFilter.trim()) {
+        const qReq = inboundReqIdFilter.trim().toLowerCase();
+        if (!r.id.toLowerCase().includes(qReq)) return false;
+      }
+
+      // 2. Tests Filter
+      if (inboundTestFilter !== 'ALL') {
+        const targetTest = inboundTestFilter.trim().toLowerCase();
+        const candTest = (r.test?.name || r.testId || '').trim().toLowerCase();
+        if (candTest !== targetTest) return false;
+      }
+
+      // 3. Clinic Filter
+      if (inboundClinicFilter !== 'ALL') {
+        const candVendor = r.vendorId || r.vendor?.id;
+        if (candVendor !== inboundClinicFilter) return false;
+      }
+
+      // 4. Status Filter
+      if (inboundStatusFilter !== 'ALL') {
+        if (r.status !== inboundStatusFilter) return false;
+      }
+
+      // 5. Candidate / Iqama / Badge Search
+      if (inboundSearchQuery.trim()) {
+        const q = inboundSearchQuery.trim().toLowerCase();
+        const matchName = r.employee?.name?.toLowerCase().includes(q);
+        const matchIqama = r.employee?.iqamaId?.toLowerCase().includes(q);
+        const matchBadge = r.employee?.employeeNo?.toLowerCase().includes(q);
+        const matchDept = (r.department || r.employee?.department || '').toLowerCase().includes(q);
+        if (!matchName && !matchIqama && !matchBadge && !matchDept) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [requests, inboundReqIdFilter, inboundTestFilter, inboundClinicFilter, inboundStatusFilter, inboundSearchQuery]);
+
+  // Scheduling Request being targeted in modal
+  const schedulingReq = useMemo(() => {
+    if (!apptModalId) return null;
+    return requests.find((r: any) => r.id === apptModalId) || null;
+  }, [apptModalId, requests]);
+
+  // Filtered requests for Clinic Slot Scheduler
+  const filteredSchedulerRequests = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const tomorrowStr = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const nowTs = Date.now();
+    const sevenDaysTs = nowTs + 7 * 86400000;
+
+    return requests.filter((r: any) => {
+      // 1. Clinic Match (only requests for this clinic vendor)
+      const candVendor = r.vendorId || r.vendor?.id;
+      if (selectedVendorId && candVendor && candVendor !== selectedVendorId) {
+        return false;
+      }
+
+      // 2. Date Filter
+      if (schedulerDateFilter === 'TODAY') {
+        if (!r.apptDate) return false;
+        const d = new Date(r.apptDate).toISOString().slice(0, 10);
+        if (d !== todayStr) return false;
+      } else if (schedulerDateFilter === 'TOMORROW') {
+        if (!r.apptDate) return false;
+        const d = new Date(r.apptDate).toISOString().slice(0, 10);
+        if (d !== tomorrowStr) return false;
+      } else if (schedulerDateFilter === 'WEEK') {
+        if (!r.apptDate) return false;
+        const t = new Date(r.apptDate).getTime();
+        if (t < nowTs - 86400000 || t > sevenDaysTs) return false;
+      } else if (schedulerDateFilter === 'CUSTOM') {
+        if (!r.apptDate) return false;
+        const d = new Date(r.apptDate).toISOString().slice(0, 10);
+        if (d !== schedulerCustomDate) return false;
+      }
+
+      // 3. Status Filter
+      if (schedulerStatusFilter === 'SCHEDULED') {
+        if (!r.apptDate || r.status === 'COMPLETED') return false;
+      } else if (schedulerStatusFilter === 'PENDING') {
+        if (r.apptDate && r.status !== 'WAITING') return false;
+      } else if (schedulerStatusFilter === 'COMPLETED') {
+        if (r.status !== 'COMPLETED') return false;
+      }
+
+      // 4. Search Filter
+      if (schedulerSearch.trim()) {
+        const q = schedulerSearch.trim().toLowerCase();
+        const matchName = r.employee?.name?.toLowerCase().includes(q);
+        const matchIqama = r.employee?.iqamaId?.toLowerCase().includes(q);
+        const matchBadge = r.employee?.employeeNo?.toLowerCase().includes(q);
+        const matchReq = r.id?.toLowerCase().includes(q);
+        const matchTest = (r.test?.name || '').toLowerCase().includes(q);
+        const matchDept = (r.department || '').toLowerCase().includes(q);
+        if (!matchName && !matchIqama && !matchBadge && !matchReq && !matchTest && !matchDept) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [requests, selectedVendorId, schedulerDateFilter, schedulerCustomDate, schedulerStatusFilter, schedulerSearch]);
+
+  // Real-time capacity statistics for Clinic Scheduler
+  const schedulerStats = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const clinicReqs = requests.filter(r => {
+      const v = r.vendorId || r.vendor?.id;
+      return !selectedVendorId || !v || v === selectedVendorId;
+    });
+
+    const total = clinicReqs.length;
+    const scheduled = clinicReqs.filter(r => r.apptDate && r.status !== 'COMPLETED').length;
+    const pendingDate = clinicReqs.filter(r => !r.apptDate && r.status !== 'COMPLETED').length;
+    const todayAppts = clinicReqs.filter(r => r.apptDate && new Date(r.apptDate).toISOString().slice(0, 10) === todayStr).length;
+    const completed = clinicReqs.filter(r => r.status === 'COMPLETED').length;
+
+    return { total, scheduled, pendingDate, todayAppts, completed };
+  }, [requests, selectedVendorId]);
+
+  // Group scheduled candidates into shift buckets
+  const shiftGroups = useMemo(() => {
+    const morning: any[] = [];
+    const afternoon: any[] = [];
+    const evening: any[] = [];
+    const unscheduled: any[] = [];
+
+    filteredSchedulerRequests.forEach((r: any) => {
+      if (!r.apptDate) {
+        unscheduled.push(r);
+        return;
+      }
+      const note = (r.note || '').toLowerCase();
+      if (note.includes('afternoon') || note.includes('13:') || note.includes('14:') || note.includes('15:') || note.includes('16:')) {
+        afternoon.push(r);
+      } else if (note.includes('evening') || note.includes('17:') || note.includes('18:') || note.includes('19:') || note.includes('20:')) {
+        evening.push(r);
+      } else {
+        morning.push(r);
+      }
+    });
+
+    return { morning, afternoon, evening, unscheduled };
+  }, [filteredSchedulerRequests]);
+
+  // Helper to resolve contracted SAP material rate for candidate
+  const getCandidateRate = useCallback((r: any): number => {
+    const testObj = testsList.find((t: any) => t.id === r.testId);
+    const effectiveVId = r.vendorId || r.vendor?.id || selectedVendorId;
+    const matchedRate = testObj?.rates?.find((rt: any) => rt.contract?.vendor?.id === effectiveVId)?.rate;
+    return matchedRate != null ? Number(matchedRate) : 100.0;
+  }, [testsList, selectedVendorId]);
+
+  interface BillableBatchGroup {
+    batchKey: string;
+    batchTitle: string;
+    isSlot: boolean;
+    isBulk: boolean;
+    requests: any[];
+    totalSubtotal: number;
+    totalVat: number;
+    totalAmount: number;
+  }
+
+  // Group completed billable requests into Slot-Wise, Bulk Upload-Wise, and Screening Protocol Cohorts
+  const billableBatches: BillableBatchGroup[] = useMemo(() => {
+    const groups: Record<string, BillableBatchGroup> = {};
+
+    completedRequests.forEach((r: any) => {
+      let meta: any = {};
+      if (r.note) {
+        try {
+          meta = typeof r.note === 'string' ? JSON.parse(r.note) : r.note;
+        } catch (_) {}
+      }
+
+      let bKey = '';
+      let bTitle = '';
+      let isSlot = false;
+      let isBulk = false;
+
+      // 1. Slot Requests (SR-1008, SR-1009, SR-1010, etc.)
+      if (meta.slotRequestId || r.id.startsWith('SR-')) {
+        const slotKey = meta.slotRequestId || r.id.split('-').slice(0, 2).join('-');
+        bKey = `SLOT-${slotKey}`;
+        bTitle = meta.slotTitle ? `${slotKey}: ${meta.slotTitle}` : `Slot Request ${slotKey}`;
+        isSlot = true;
+      }
+      // 2. Named Cohort Uploads (e.g. REQ-2026-0104, custom batch files)
+      else if (meta.batchId && meta.batchId !== 'BATCH-2026-CLEARANCE-ROSTER') {
+        bKey = `BATCH-${meta.batchId}`;
+        bTitle = meta.batchName || (meta.fileName ? `Bulk Upload: ${meta.fileName}` : `Batch ${meta.batchId}`);
+        isBulk = true;
+      }
+      // 3. Workforce Clearance Master Roster (REQ-CLR-xxx or meta.batchId === 'BATCH-2026-CLEARANCE-ROSTER')
+      // Segment by Screening Protocol (e.g. Ma'aden, SABIC, Driving Licence, Hadeed)
+      else if (r.id.startsWith('REQ-CLR-') || meta.batchId === 'BATCH-2026-CLEARANCE-ROSTER') {
+        const protocolName = r.test?.name || meta.shortName || 'Workforce Medical Clearance';
+        bKey = `PROTO-${r.testId || protocolName.replace(/\s+/g, '-').toUpperCase()}`;
+        bTitle = `Clearance: ${protocolName}`;
+        isBulk = true;
+      }
+      // 4. Other Bulk Uploads (REQ-xxx, BULK-xxx)
+      else if (r.id.startsWith('REQ-') || r.id.startsWith('BULK-')) {
+        const parts = r.id.split('-');
+        const prefix = parts.slice(0, 3).join('-');
+        bKey = `BATCH-${prefix}`;
+        bTitle = meta.fileName ? `Bulk Upload: ${meta.fileName}` : `Batch ${prefix}`;
+        isBulk = true;
+      }
+      // 5. Individual or Ad-Hoc
+      else {
+        const protocolName = r.test?.name || 'Individual Examination';
+        bKey = `IND-${r.testId || protocolName.replace(/\s+/g, '-').toUpperCase()}`;
+        bTitle = `Ad-Hoc: ${protocolName}`;
+      }
+
+      if (!groups[bKey]) {
+        groups[bKey] = {
+          batchKey: bKey,
+          batchTitle: bTitle,
+          isSlot,
+          isBulk,
+          requests: [],
+          totalSubtotal: 0,
+          totalVat: 0,
+          totalAmount: 0
+        };
+      }
+
+      groups[bKey].requests.push(r);
+      const rate = getCandidateRate(r);
+      groups[bKey].totalSubtotal += rate;
+    });
+
+    Object.values(groups).forEach(g => {
+      g.totalVat = Number((g.totalSubtotal * 0.15).toFixed(2));
+      g.totalAmount = Number((g.totalSubtotal + g.totalVat).toFixed(2));
+    });
+
+    return Object.values(groups).sort((a, b) => b.requests.length - a.requests.length);
+  }, [completedRequests, getCandidateRate]);
+
+  // Filtered billable batches based on req id, tests, clinics tested, batch dropdown, and candidate search
+  const filteredBillableBatches = useMemo(() => {
+    return billableBatches
+      .map(b => {
+        if (selectedInvoiceBatchFilter !== 'ALL' && b.batchKey !== selectedInvoiceBatchFilter) {
+          return null;
+        }
+
+        const matchingRequests = b.requests.filter((r: any) => {
+          // 1. Req ID Filter
+          if (invoiceReqIdFilter.trim()) {
+            const qReq = invoiceReqIdFilter.trim().toLowerCase();
+            if (!r.id.toLowerCase().includes(qReq)) return false;
+          }
+
+          // 2. Tests Filter
+          if (invoiceTestFilter !== 'ALL') {
+            const targetTest = invoiceTestFilter.trim().toLowerCase();
+            const candTest = (r.test?.name || r.testId || '').trim().toLowerCase();
+            if (candTest !== targetTest) return false;
+          }
+
+          // 3. Clinics Tested Filter
+          if (invoiceClinicFilter !== 'ALL') {
+            const candVendor = r.vendorId || r.vendor?.id;
+            if (candVendor !== invoiceClinicFilter) return false;
+          }
+
+          // 4. Candidate Name / Iqama Search
+          if (invoiceSearchQuery.trim()) {
+            const q = invoiceSearchQuery.trim().toLowerCase();
+            const matchName = r.employee?.name?.toLowerCase().includes(q);
+            const matchIqama = r.employee?.iqamaId?.toLowerCase().includes(q);
+            const matchBadge = r.employee?.employeeNo?.toLowerCase().includes(q);
+            const matchNote = r.note && typeof r.note === 'string' && r.note.toLowerCase().includes(q);
+            if (!matchName && !matchIqama && !matchBadge && !matchNote) {
+              return false;
+            }
+          }
+
+          return true;
+        });
+
+        if (matchingRequests.length > 0) {
+          const subtotal = matchingRequests.reduce((sum, r) => sum + getCandidateRate(r), 0);
+          const vat = Number((subtotal * 0.15).toFixed(2));
+          const total = Number((subtotal + vat).toFixed(2));
+          return {
+            ...b,
+            requests: matchingRequests,
+            totalSubtotal: subtotal,
+            totalVat: vat,
+            totalAmount: total
+          };
+        }
+        return null;
+      })
+      .filter(Boolean) as BillableBatchGroup[];
+  }, [billableBatches, selectedInvoiceBatchFilter, invoiceReqIdFilter, invoiceTestFilter, invoiceClinicFilter, invoiceSearchQuery, getCandidateRate]);
+
+  // Filtered flat completed requests based on req id, tests, clinics tested, batch dropdown, and candidate search
+  const filteredFlatCompletedRequests = useMemo(() => {
+    return completedRequests.filter((r: any) => {
+      // 1. Req ID Filter
+      if (invoiceReqIdFilter.trim()) {
+        const qReq = invoiceReqIdFilter.trim().toLowerCase();
+        if (!r.id.toLowerCase().includes(qReq)) return false;
+      }
+
+      // 2. Tests Filter
+      if (invoiceTestFilter !== 'ALL') {
+        const targetTest = invoiceTestFilter.trim().toLowerCase();
+        const candTest = (r.test?.name || r.testId || '').trim().toLowerCase();
+        if (candTest !== targetTest) return false;
+      }
+
+      // 3. Clinics Tested Filter
+      if (invoiceClinicFilter !== 'ALL') {
+        const candVendor = r.vendorId || r.vendor?.id;
+        if (candVendor !== invoiceClinicFilter) return false;
+      }
+
+      // 4. Batch Cohort Filter
+      if (selectedInvoiceBatchFilter !== 'ALL') {
+        const targetBatch = billableBatches.find(b => b.batchKey === selectedInvoiceBatchFilter);
+        if (targetBatch && !targetBatch.requests.some(br => br.id === r.id)) {
+          return false;
+        }
+      }
+
+      // 5. Candidate Name / Iqama Search
+      if (invoiceSearchQuery.trim()) {
+        const q = invoiceSearchQuery.trim().toLowerCase();
+        const matchName = r.employee?.name?.toLowerCase().includes(q);
+        const matchIqama = r.employee?.iqamaId?.toLowerCase().includes(q);
+        const matchBadge = r.employee?.employeeNo?.toLowerCase().includes(q);
+        const matchNote = r.note && typeof r.note === 'string' && r.note.toLowerCase().includes(q);
+        if (!matchName && !matchIqama && !matchBadge && !matchNote) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [completedRequests, invoiceReqIdFilter, invoiceTestFilter, invoiceClinicFilter, selectedInvoiceBatchFilter, invoiceSearchQuery, billableBatches]);
+
+  // Live financial totals for all currently selected candidate IDs
+  const invoiceSelectedSummary = useMemo(() => {
+    let subtotal = 0;
+    completedRequests.forEach(r => {
+      if (billableRequests.includes(r.id)) {
+        subtotal += getCandidateRate(r);
+      }
+    });
+    const vat = Number((subtotal * 0.15).toFixed(2));
+    const total = Number((subtotal + vat).toFixed(2));
+    return {
+      count: billableRequests.length,
+      subtotal,
+      vat,
+      total
+    };
+  }, [billableRequests, completedRequests, getCandidateRate]);
+
+  const toggleInvoiceBatchExpand = (batchKey: string) => {
+    setExpandedInvoiceBatches(prev => ({
+      ...prev,
+      [batchKey]: prev[batchKey] === false ? true : false
+    }));
+  };
+
+  const handleToggleBatchRequests = (batchReqs: any[]) => {
+    const ids = batchReqs.map(r => r.id);
+    const allSelected = ids.every(id => billableRequests.includes(id));
+    if (allSelected) {
+      setBillableRequests(prev => prev.filter(id => !ids.includes(id)));
+    } else {
+      setBillableRequests(prev => Array.from(new Set([...prev, ...ids])));
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* 1. TOP CLINIC BANNER & NAVIGATION BAR */}
@@ -1089,7 +1638,11 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 {userRole === 'ADMIN' ? (
                   <select
                     value={selectedVendorId}
-                    onChange={(e) => setSelectedVendorId(e.target.value)}
+                    onChange={(e) => {
+                      const nextVendorId = e.target.value;
+                      setSelectedVendorId(nextVendorId);
+                      loadClinicData(nextVendorId);
+                    }}
                     className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold px-2 py-1 rounded-lg border border-slate-300 focus:outline-none cursor-pointer"
                   >
                     {clinics.map(c => (
@@ -1145,6 +1698,9 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
             >
               <span className="material-symbols-outlined text-[17px]">calendar_month</span>
               <span>Slot Scheduler</span>
+              <span className="px-1.5 py-0.2 rounded-full bg-sky-100 text-sky-800 font-bold text-[10px]">
+                {requests.filter(r => r.apptDate).length} Booked
+              </span>
             </button>
 
             <button
@@ -1514,21 +2070,8 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                   </h2>
                 </div>
 
-                {/* Actions & Bulk Search */}
+                {/* Actions & Bulk Upload */}
                 <div className="flex flex-wrap items-center gap-2.5">
-                  <div className="relative min-w-[220px]">
-                    <span className="material-symbols-outlined absolute left-2.5 top-2 text-slate-400 text-[17px]">
-                      search
-                    </span>
-                    <input
-                      type="text"
-                      placeholder="Filter bulk batches, Iqama..."
-                      value={bulkSearch}
-                      onChange={(e) => setBulkSearch(e.target.value)}
-                      className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-primary bg-slate-50/70 shadow-2xs"
-                    />
-                  </div>
-
                   {/* Bulk Folder / Multi-PDF Upload Action Button */}
                   <button
                     type="button"
@@ -1551,6 +2094,103 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                     <span className="material-symbols-outlined text-[16px]">refresh</span>
                     <span>Refresh</span>
                   </button>
+                </div>
+              </div>
+
+              {/* Master Dropdown & Search Filter Controls */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 p-3 rounded-xl bg-slate-50/90 border border-slate-200/90 text-xs">
+                {/* Search */}
+                <div className="lg:col-span-4 relative">
+                  <span className="material-symbols-outlined absolute left-2.5 top-2 text-slate-400 text-[17px]">
+                    search
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Search candidate, Iqama, badge, batch ID..."
+                    value={bulkSearch}
+                    onChange={(e) => {
+                      setBulkSearch(e.target.value);
+                      setOneByOneIdSearch(e.target.value);
+                    }}
+                    className="w-full pl-8 pr-7 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-primary shadow-2xs"
+                  />
+                  {bulkSearch && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBulkSearch('');
+                        setOneByOneIdSearch('');
+                      }}
+                      className="absolute right-2 top-2 text-slate-400 hover:text-slate-600"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">cancel</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Protocol Filter Dropdown */}
+                <div className="lg:col-span-3">
+                  <select
+                    value={oneByOneProtocolFilter}
+                    onChange={(e) => setOneByOneProtocolFilter(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-800 bg-white shadow-2xs focus:outline-none focus:border-primary cursor-pointer truncate"
+                  >
+                    <option value="ALL">All Test Protocols ({candidates.length})</option>
+                    {availableProtocols.map((protocol) => (
+                      <option key={protocol} value={protocol}>
+                        {protocol}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Department Filter Dropdown */}
+                <div className="lg:col-span-3">
+                  <select
+                    value={oneByOneDeptFilter}
+                    onChange={(e) => setOneByOneDeptFilter(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-800 bg-white shadow-2xs focus:outline-none focus:border-primary cursor-pointer truncate"
+                  >
+                    <option value="ALL">All Departments &amp; Trades</option>
+                    {availableDepartments.map((dept) => (
+                      <option key={dept} value={dept}>
+                        {dept}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Status Filter & Reset */}
+                <div className="lg:col-span-2 flex items-center gap-1.5">
+                  <select
+                    value={oneByOneStatusFilter}
+                    onChange={(e) => setOneByOneStatusFilter(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-800 bg-white shadow-2xs focus:outline-none focus:border-primary cursor-pointer"
+                  >
+                    <option value="ALL">All Statuses</option>
+                    <option value="FIT">Fit for Duty</option>
+                    <option value="CONDITIONAL">Conditional</option>
+                    <option value="UNFIT">Temporarily Unfit</option>
+                    <option value="CERTIFIED">Certified</option>
+                    <option value="PDF_READY">PDF Ready</option>
+                    <option value="PENDING">Pending File</option>
+                  </select>
+                  {(bulkSearch || oneByOneProtocolFilter !== 'ALL' || oneByOneDeptFilter !== 'ALL' || oneByOneStatusFilter !== 'ALL') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBulkSearch('');
+                        setOneByOneIdSearch('');
+                        setOneByOneProtocolFilter('ALL');
+                        setOneByOneDeptFilter('ALL');
+                        setOneByOneStatusFilter('ALL');
+                      }}
+                      title="Clear all filters"
+                      className="px-2 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-colors cursor-pointer shrink-0"
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1652,6 +2292,31 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                                 <span className="material-symbols-outlined text-[14px] text-amber-600">hourglass_top</span>
                                 <span>{group.pendingCount} Pending</span>
                               </span>
+
+                              {/* Create Invoice / Billing Action Shortcut */}
+                              {group.unbilledCount > 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const unbilledIds = group.candidates
+                                      .filter(c => (c.isCertified || c.rawRequest?.status === 'COMPLETED' || c.rawRequest?.report) && (!c.rawRequest?.invoiceItems || c.rawRequest?.invoiceItems.length === 0))
+                                      .map(c => c.id);
+                                    setBillableRequests(unbilledIds);
+                                    setActiveSubTab('invoice');
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-secondary hover:bg-secondary-hover text-white shadow-xs transition-all cursor-pointer"
+                                  title="Open Invoice Clearance tab with completed candidates from this batch"
+                                >
+                                  <span className="material-symbols-outlined text-[15px]">receipt_long</span>
+                                  <span>Create Invoice ({group.unbilledCount})</span>
+                                </button>
+                              ) : group.doneCount > 0 ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                  <span className="material-symbols-outlined text-[14px]">verified</span>
+                                  <span>Invoiced</span>
+                                </span>
+                              ) : null}
                             </div>
 
                             {/* Expand/Collapse toggle */}
@@ -1854,22 +2519,185 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 border-b border-slate-100 gap-3">
             <div>
-              <h3 className="font-display font-extrabold text-base text-slate-900">
-                Inbound Clearance Requests ({requests.length})
-              </h3>
-              <p className="text-xs text-slate-500">
-                Live candidate clearances assigned to {currentClinic.name} in PostgreSQL
+              <div className="flex items-center gap-2">
+                <span className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[20px]">move_to_inbox</span>
+                </span>
+                <h3 className="font-display font-extrabold text-base text-slate-900">
+                  Inbound Clearance Requests ({requests.length})
+                </h3>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Live candidate clearances assigned to <span className="font-semibold text-slate-800">{currentClinic.name}</span> in PostgreSQL
               </p>
             </div>
 
             <div className="flex items-center gap-2">
               <button
                 onClick={() => loadClinicData(selectedVendorId)}
-                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer border border-slate-200"
               >
                 <span className="material-symbols-outlined text-[16px]">refresh</span>
                 <span>Refresh Live</span>
               </button>
+            </div>
+          </div>
+
+          {/* DEDICATED INBOUND FILTER BAR: TESTS, CLINICS TESTED & REQ ID */}
+          <div className="bg-slate-50/90 border border-slate-200/90 rounded-2xl p-3.5 space-y-2.5 shadow-2xs">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-200/60">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[15px] text-primary">filter_alt</span>
+                <span>Filter Inbound Clearance Requests</span>
+              </span>
+              <span className="text-[11px] font-mono font-bold text-slate-500">
+                Matching: {filteredInboundRequests.length} of {requests.length} Requests
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 text-xs">
+              {/* 1. REQ ID Filter */}
+              <div className="lg:col-span-3">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Filter by Req ID
+                </label>
+                <div className="relative">
+                  <span className="material-symbols-outlined absolute left-2.5 top-2 text-slate-400 text-[16px]">
+                    tag
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Req ID (e.g. REQ-CLR-, SR-)..."
+                    value={inboundReqIdFilter}
+                    onChange={(e) => setInboundReqIdFilter(e.target.value)}
+                    className="w-full pl-8 pr-7 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-primary shadow-2xs"
+                  />
+                  {inboundReqIdFilter && (
+                    <button
+                      type="button"
+                      onClick={() => setInboundReqIdFilter('')}
+                      className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">cancel</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 2. Tests Filter */}
+              <div className="lg:col-span-3">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Filter by Test / Protocol
+                </label>
+                <select
+                  value={inboundTestFilter}
+                  onChange={(e) => setInboundTestFilter(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-800 shadow-2xs focus:outline-none focus:border-primary cursor-pointer truncate"
+                >
+                  <option value="ALL">All Medical Tests ({requests.length})</option>
+                  {availableInboundTests.map((tName) => {
+                    const count = requests.filter(r => (r.test?.name || '').trim().toLowerCase() === tName.toLowerCase()).length;
+                    return (
+                      <option key={tName} value={tName}>
+                        {tName} ({count})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {/* 3. Clinics Tested Filter */}
+              <div className="lg:col-span-2">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Clinics Tested
+                </label>
+                <select
+                  value={inboundClinicFilter}
+                  onChange={(e) => {
+                    const targetClinic = e.target.value;
+                    setInboundClinicFilter(targetClinic);
+                    if (targetClinic === 'ALL') {
+                      loadClinicData('ALL');
+                    } else {
+                      setSelectedVendorId(targetClinic);
+                      loadClinicData(targetClinic);
+                    }
+                  }}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-800 shadow-2xs focus:outline-none focus:border-primary cursor-pointer truncate"
+                >
+                  <option value="ALL">All Clinics</option>
+                  {availableInboundClinics.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.code} - {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 4. Status Filter */}
+              <div className="lg:col-span-2">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Request Status
+                </label>
+                <select
+                  value={inboundStatusFilter}
+                  onChange={(e) => setInboundStatusFilter(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-800 shadow-2xs focus:outline-none focus:border-primary cursor-pointer truncate"
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="COMPLETED">Completed</option>
+                  <option value="SCHEDULED">Scheduled</option>
+                  <option value="WAITING">Waiting Queue</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+              </div>
+
+              {/* 5. Candidate Search & Clear Actions */}
+              <div className="lg:col-span-2">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Search Employee
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <div className="relative flex-1">
+                    <span className="material-symbols-outlined absolute left-2.5 top-2 text-slate-400 text-[16px]">
+                      search
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Name, Iqama..."
+                      value={inboundSearchQuery}
+                      onChange={(e) => setInboundSearchQuery(e.target.value)}
+                      className="w-full pl-8 pr-7 py-1.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-primary shadow-2xs"
+                    />
+                    {inboundSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setInboundSearchQuery('')}
+                        className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">cancel</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {(inboundReqIdFilter || inboundTestFilter !== 'ALL' || inboundClinicFilter !== 'ALL' || inboundStatusFilter !== 'ALL' || inboundSearchQuery) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInboundReqIdFilter('');
+                        setInboundTestFilter('ALL');
+                        setInboundClinicFilter('ALL');
+                        setInboundStatusFilter('ALL');
+                        setInboundSearchQuery('');
+                      }}
+                      title="Reset all inbound filters"
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-colors cursor-pointer shrink-0"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1880,6 +2708,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                   <th className="py-3 px-3">Request ID</th>
                   <th className="py-3 px-3">Employee</th>
                   <th className="py-3 px-3">Iqama / National ID</th>
+                  <th className="py-3 px-3">Clinic Tested</th>
                   <th className="py-3 px-3">Department</th>
                   <th className="py-3 px-3">Medical Screening</th>
                   <th className="py-3 px-3">Status</th>
@@ -1888,14 +2717,14 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
-                {requests.length === 0 ? (
+                {filteredInboundRequests.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-400">
-                      No inbound requests assigned to this medical center yet.
+                    <td colSpan={9} className="py-8 text-center text-slate-400">
+                      No inbound requests match the selected filter criteria.
                     </td>
                   </tr>
                 ) : (
-                  requests.map((r) => (
+                  filteredInboundRequests.map((r) => (
                     <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-3 px-3 font-mono font-bold text-slate-900">{r.id}</td>
                       <td className="py-3 px-3">
@@ -1903,7 +2732,13 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                         <div className="text-[11px] font-mono text-slate-400">{r.employee?.employeeNo}</div>
                       </td>
                       <td className="py-3 px-3 font-mono text-slate-600">{r.employee?.iqamaId || '-'}</td>
-                      <td className="py-3 px-3 text-slate-600">{r.department || 'PMTA'}</td>
+                      <td className="py-3 px-3">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                          <span className="material-symbols-outlined text-[12px] text-slate-400">local_hospital</span>
+                          {r.vendor?.code || r.vendorId || currentClinic.code}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-slate-600">{r.department || r.employee?.department || 'Operations'}</td>
                       <td className="py-3 px-3 text-slate-800 font-semibold">{r.test?.name || 'General Medical'}</td>
                       <td className="py-3 px-3">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -1931,10 +2766,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                             Examine / Lab
                           </button>
                           <button
-                            onClick={() => {
-                              setApptModalId(r.id);
-                              setApptDate(new Date().toISOString().slice(0, 10));
-                            }}
+                            onClick={() => openScheduleModal(r)}
                             className="p-1 rounded-lg hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
                             title="Schedule Appointment"
                           >
@@ -1953,139 +2785,1271 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
 
       {/* 6. APPOINTMENT SLOTS SCHEDULER TAB */}
       {activeSubTab === 'slots' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-5">
+          {/* Header & Clinic Shift Operating Hours */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between pb-4 border-b border-slate-100 gap-4">
             <div>
-              <h3 className="font-display font-extrabold text-base text-slate-900">
-                Clinic Appointment Slots ({currentClinic.code})
-              </h3>
-              <p className="text-xs text-slate-500">
-                Shift allocation for candidate physicals at {currentClinic.name}
+              <div className="flex items-center gap-2">
+                <span className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[20px]">calendar_month</span>
+                </span>
+                <h3 className="font-display font-extrabold text-base text-slate-900">
+                  Clinic Appointment & Shift Scheduler ({currentClinic.code})
+                </h3>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Manage appointment bookings, time blocks, and worker arrivals for <span className="font-semibold text-slate-800">{currentClinic.name}</span>
               </p>
             </div>
-            <span className="rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold px-3 py-1">
-              Active Shift: 08:00 AM - 17:00 PM
-            </span>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold px-3 py-1.5 flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>Active Operating Hours: 08:00 AM – 20:00 PM</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => loadClinicData(selectedVendorId)}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                title="Refresh Appointments"
+              >
+                <span className="material-symbols-outlined text-[16px]">sync</span>
+                <span>Refresh Live</span>
+              </button>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {requests.slice(0, 3).map((r: any, idx: number) => (
-              <div
-                key={r.id}
-                className={`rounded-xl border p-4 bg-slate-50/50 border-l-4 ${
-                  r.status === 'COMPLETED' ? 'border-l-emerald-500' : 'border-l-primary'
-                }`}
-              >
-                <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                  <span>Slot #{idx + 1}: 0{8 + idx * 2}:00 AM</span>
-                  <span className={`px-2 py-0.5 rounded text-[10px] ${
-                    r.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-800' : 'bg-sky-100 text-sky-800'
-                  }`}>
-                    {r.status}
-                  </span>
-                </div>
-                <p className="font-display font-bold text-sm text-slate-900 mt-2">{r.employee?.name || 'Worker'}</p>
-                <p className="text-xs text-slate-500">{r.department} &bull; {r.test?.name}</p>
-                <div className="mt-3 text-[11px] text-slate-600 flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[15px] text-primary">badge</span>
-                  <span>National ID: {r.employee?.iqamaId || r.employee?.employeeNo || '—'}</span>
+          {/* Real-Time Appointment Metrics */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div
+              onClick={() => { setSchedulerDateFilter('TODAY'); setSchedulerStatusFilter('ALL'); }}
+              className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
+                schedulerDateFilter === 'TODAY'
+                  ? 'bg-primary/5 border-primary shadow-xs'
+                  : 'bg-slate-50/70 border-slate-200/80 hover:bg-slate-100/60'
+              }`}
+            >
+              <div className="flex items-center justify-between text-slate-500">
+                <span className="text-[10px] font-bold uppercase tracking-wider">Today's Physicals</span>
+                <span className="material-symbols-outlined text-[18px] text-primary">today</span>
+              </div>
+              <div className="mt-1.5 flex items-baseline gap-1.5">
+                <span className="font-display font-extrabold text-2xl text-slate-900">{schedulerStats.todayAppts}</span>
+                <span className="text-xs font-semibold text-slate-500">Booked Today</span>
+              </div>
+            </div>
+
+            <div
+              onClick={() => { setSchedulerDateFilter('ALL'); setSchedulerStatusFilter('SCHEDULED'); }}
+              className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
+                schedulerStatusFilter === 'SCHEDULED' && schedulerDateFilter === 'ALL'
+                  ? 'bg-sky-50 border-sky-400 shadow-xs'
+                  : 'bg-slate-50/70 border-slate-200/80 hover:bg-slate-100/60'
+              }`}
+            >
+              <div className="flex items-center justify-between text-slate-500">
+                <span className="text-[10px] font-bold uppercase tracking-wider">Total Scheduled</span>
+                <span className="material-symbols-outlined text-[18px] text-sky-600">event_available</span>
+              </div>
+              <div className="mt-1.5 flex items-baseline gap-1.5">
+                <span className="font-display font-extrabold text-2xl text-sky-900">{schedulerStats.scheduled}</span>
+                <span className="text-xs font-semibold text-slate-500">Confirmed</span>
+              </div>
+            </div>
+
+            <div
+              onClick={() => { setSchedulerDateFilter('ALL'); setSchedulerStatusFilter('PENDING'); }}
+              className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
+                schedulerStatusFilter === 'PENDING'
+                  ? 'bg-amber-50 border-amber-400 shadow-xs'
+                  : 'bg-slate-50/70 border-slate-200/80 hover:bg-slate-100/60'
+              }`}
+            >
+              <div className="flex items-center justify-between text-slate-500">
+                <span className="text-[10px] font-bold uppercase tracking-wider">Awaiting Appointment</span>
+                <span className="material-symbols-outlined text-[18px] text-amber-600">pending_actions</span>
+              </div>
+              <div className="mt-1.5 flex items-baseline gap-1.5">
+                <span className="font-display font-extrabold text-2xl text-amber-800">{schedulerStats.pendingDate}</span>
+                <span className="text-xs font-semibold text-amber-700">Needs Date</span>
+              </div>
+            </div>
+
+            <div
+              onClick={() => { setSchedulerDateFilter('ALL'); setSchedulerStatusFilter('COMPLETED'); }}
+              className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
+                schedulerStatusFilter === 'COMPLETED'
+                  ? 'bg-emerald-50 border-emerald-400 shadow-xs'
+                  : 'bg-slate-50/70 border-slate-200/80 hover:bg-slate-100/60'
+              }`}
+            >
+              <div className="flex items-center justify-between text-slate-500">
+                <span className="text-[10px] font-bold uppercase tracking-wider">Examined & Certified</span>
+                <span className="material-symbols-outlined text-[18px] text-emerald-600">verified</span>
+              </div>
+              <div className="mt-1.5 flex items-baseline gap-1.5">
+                <span className="font-display font-extrabold text-2xl text-emerald-800">{schedulerStats.completed}</span>
+                <span className="text-xs font-semibold text-emerald-700">Finished</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Interactive Date & Shift Controls Toolbar */}
+          <div className="p-3.5 bg-slate-50/90 rounded-2xl border border-slate-200 space-y-3">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+              {/* Quick Date Pills */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs font-bold text-slate-500 mr-1 flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[16px]">calendar_today</span>
+                  Date:
+                </span>
+                {(
+                  [
+                    { id: 'ALL', label: 'All Dates' },
+                    { id: 'TODAY', label: 'Today' },
+                    { id: 'TOMORROW', label: 'Tomorrow' },
+                    { id: 'WEEK', label: 'Next 7 Days' }
+                  ] as const
+                ).map((pill) => (
+                  <button
+                    key={pill.id}
+                    type="button"
+                    onClick={() => setSchedulerDateFilter(pill.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      schedulerDateFilter === pill.id
+                        ? 'bg-primary text-white shadow-xs'
+                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    {pill.label}
+                  </button>
+                ))}
+
+                {/* Custom Date Picker */}
+                <div className="flex items-center gap-1 ml-1">
+                  <input
+                    type="date"
+                    value={schedulerCustomDate}
+                    onChange={(e) => {
+                      setSchedulerCustomDate(e.target.value);
+                      setSchedulerDateFilter('CUSTOM');
+                    }}
+                    className={`px-2.5 py-1 text-xs font-bold rounded-lg border bg-white shadow-2xs focus:outline-none focus:border-primary ${
+                      schedulerDateFilter === 'CUSTOM'
+                        ? 'border-primary ring-2 ring-primary/20 text-slate-900'
+                        : 'border-slate-200 text-slate-600'
+                    }`}
+                  />
                 </div>
               </div>
-            ))}
+
+              {/* View Switcher: Shifts vs List */}
+              <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shrink-0 self-start lg:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setSchedulerViewMode('shifts')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                    schedulerViewMode === 'shifts'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[15px]">view_column</span>
+                  <span>Shift View</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSchedulerViewMode('list')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                    schedulerViewMode === 'list'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[15px]">table_rows</span>
+                  <span>List View</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Sub-Filters: Search & Status Dropdown */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 border-t border-slate-200/70">
+              <div className="sm:col-span-2 relative">
+                <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                  <span className="material-symbols-outlined text-[17px]">search</span>
+                </span>
+                <input
+                  type="text"
+                  value={schedulerSearch}
+                  onChange={(e) => setSchedulerSearch(e.target.value)}
+                  placeholder="Filter by Candidate Name, Iqama, Req ID, Protocol, Department..."
+                  className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-primary shadow-2xs"
+                />
+                {schedulerSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setSchedulerSearch('')}
+                    className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">close</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <select
+                  value={schedulerStatusFilter}
+                  onChange={(e) => setSchedulerStatusFilter(e.target.value as any)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-2xs focus:outline-none focus:border-primary cursor-pointer"
+                >
+                  <option value="ALL">All Statuses ({requests.length})</option>
+                  <option value="SCHEDULED">Scheduled Only ({schedulerStats.scheduled})</option>
+                  <option value="PENDING">Awaiting Date ({schedulerStats.pendingDate})</option>
+                  <option value="COMPLETED">Completed ({schedulerStats.completed})</option>
+                </select>
+
+                {(schedulerDateFilter !== 'ALL' || schedulerStatusFilter !== 'ALL' || schedulerSearch) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSchedulerDateFilter('ALL');
+                      setSchedulerStatusFilter('ALL');
+                      setSchedulerSearch('');
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 text-xs font-bold cursor-pointer shrink-0 transition-colors"
+                    title="Reset all filters"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
+
+          {/* Action Required: Unscheduled Candidates Notice Banner */}
+          {shiftGroups.unscheduled.length > 0 && schedulerStatusFilter !== 'SCHEDULED' && (
+            <div className="p-4 bg-amber-50/90 border border-amber-200 rounded-2xl space-y-3 animate-fade-in shadow-2xs">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="h-8 w-8 rounded-xl bg-amber-500/10 text-amber-700 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-[20px]">notification_important</span>
+                  </span>
+                  <div>
+                    <h4 className="font-display font-extrabold text-sm text-amber-900">
+                      {shiftGroups.unscheduled.length} Candidates Awaiting Appointment Booking
+                    </h4>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      These workforce clearance requests have been assigned to {currentClinic.name} but do not have an appointment date slotted yet.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+                {shiftGroups.unscheduled.slice(0, 6).map((r) => (
+                  <div key={r.id} className="p-2.5 bg-white rounded-xl border border-amber-200 flex items-center justify-between gap-2 shadow-2xs">
+                    <div className="min-w-0">
+                      <div className="font-bold text-xs text-slate-900 truncate">{r.employee?.name || 'Worker'}</div>
+                      <div className="text-[10px] text-slate-500 flex items-center gap-1 font-mono">
+                        <span>{r.employee?.iqamaId || r.employee?.employeeNo}</span>
+                        <span>&bull;</span>
+                        <span className="truncate">{r.test?.name}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openScheduleModal(r)}
+                      className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">calendar_add_on</span>
+                      <span>Book Slot</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* VIEW MODE 1: SHIFT COLUMNS (MORNING / AFTERNOON / EVENING) */}
+          {schedulerViewMode === 'shifts' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* 1. MORNING SHIFT */}
+                <div className="bg-slate-50/70 rounded-2xl border border-slate-200/90 p-4 space-y-3">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-200">
+                    <div className="flex items-center gap-2">
+                      <span className="h-7 w-7 rounded-lg bg-amber-500/10 text-amber-600 flex items-center justify-center">
+                        <span className="material-symbols-outlined text-[17px]">wb_sunny</span>
+                      </span>
+                      <div>
+                        <h4 className="font-display font-extrabold text-xs text-slate-900">Morning Shift</h4>
+                        <span className="text-[10px] text-slate-500">08:00 AM – 12:00 PM</span>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700 font-bold text-[11px]">
+                      {shiftGroups.morning.length} Booked
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5 max-h-[560px] overflow-y-auto pr-1">
+                    {shiftGroups.morning.length === 0 ? (
+                      <div className="py-8 text-center text-xs text-slate-400 bg-white rounded-xl border border-dashed border-slate-200">
+                        No appointments slotted for this shift
+                      </div>
+                    ) : (
+                      shiftGroups.morning.map((r, idx) => (
+                        <div
+                          key={r.id}
+                          className={`p-3 bg-white rounded-xl border border-slate-200/90 border-l-4 transition-all shadow-2xs space-y-2 ${
+                            r.status === 'COMPLETED'
+                              ? 'border-l-emerald-500'
+                              : r.status === 'SCHEDULED'
+                              ? 'border-l-primary'
+                              : 'border-l-amber-500'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                              Slot #{idx + 1} &bull; 0{8 + Math.floor(idx * 0.5)}:{idx % 2 === 0 ? '00' : '30'} AM
+                            </span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              r.status === 'COMPLETED'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : r.status === 'SCHEDULED'
+                                ? 'bg-sky-100 text-sky-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {r.status}
+                            </span>
+                          </div>
+
+                          <div>
+                            <div className="font-bold text-xs text-slate-900">{r.employee?.name || 'Worker'}</div>
+                            <div className="text-[11px] text-slate-500 truncate">{r.test?.name}</div>
+                          </div>
+
+                          <div className="text-[10px] text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono pt-1 border-t border-slate-100">
+                            <span>ID: {r.employee?.iqamaId || r.employee?.employeeNo || '—'}</span>
+                            <span>&bull;</span>
+                            <span>{r.apptDate ? new Date(r.apptDate).toLocaleDateString() : 'Pending'}</span>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => openScheduleModal(r)}
+                              className="px-2 py-1 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-[11px] font-bold transition-colors cursor-pointer"
+                              title="Change date or shift"
+                            >
+                              Reschedule
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDirectExamine(r)}
+                              className="px-2.5 py-1 rounded-lg bg-primary hover:bg-primary-hover text-white text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
+                            >
+                              Examine / Lab
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. AFTERNOON SHIFT */}
+                <div className="bg-slate-50/70 rounded-2xl border border-slate-200/90 p-4 space-y-3">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-200">
+                    <div className="flex items-center gap-2">
+                      <span className="h-7 w-7 rounded-lg bg-sky-500/10 text-sky-600 flex items-center justify-center">
+                        <span className="material-symbols-outlined text-[17px]">partly_cloudy_day</span>
+                      </span>
+                      <div>
+                        <h4 className="font-display font-extrabold text-xs text-slate-900">Afternoon Shift</h4>
+                        <span className="text-[10px] text-slate-500">12:00 PM – 16:00 PM</span>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700 font-bold text-[11px]">
+                      {shiftGroups.afternoon.length} Booked
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5 max-h-[560px] overflow-y-auto pr-1">
+                    {shiftGroups.afternoon.length === 0 ? (
+                      <div className="py-8 text-center text-xs text-slate-400 bg-white rounded-xl border border-dashed border-slate-200">
+                        No appointments slotted for this shift
+                      </div>
+                    ) : (
+                      shiftGroups.afternoon.map((r, idx) => (
+                        <div
+                          key={r.id}
+                          className={`p-3 bg-white rounded-xl border border-slate-200/90 border-l-4 transition-all shadow-2xs space-y-2 ${
+                            r.status === 'COMPLETED'
+                              ? 'border-l-emerald-500'
+                              : r.status === 'SCHEDULED'
+                              ? 'border-l-primary'
+                              : 'border-l-amber-500'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                              Slot #{idx + 1} &bull; {12 + Math.floor(idx * 0.5)}:{idx % 2 === 0 ? '00' : '30'} PM
+                            </span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              r.status === 'COMPLETED'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : r.status === 'SCHEDULED'
+                                ? 'bg-sky-100 text-sky-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {r.status}
+                            </span>
+                          </div>
+
+                          <div>
+                            <div className="font-bold text-xs text-slate-900">{r.employee?.name || 'Worker'}</div>
+                            <div className="text-[11px] text-slate-500 truncate">{r.test?.name}</div>
+                          </div>
+
+                          <div className="text-[10px] text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono pt-1 border-t border-slate-100">
+                            <span>ID: {r.employee?.iqamaId || r.employee?.employeeNo || '—'}</span>
+                            <span>&bull;</span>
+                            <span>{r.apptDate ? new Date(r.apptDate).toLocaleDateString() : 'Pending'}</span>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => openScheduleModal(r)}
+                              className="px-2 py-1 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-[11px] font-bold transition-colors cursor-pointer"
+                            >
+                              Reschedule
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDirectExamine(r)}
+                              className="px-2.5 py-1 rounded-lg bg-primary hover:bg-primary-hover text-white text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
+                            >
+                              Examine / Lab
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. EVENING SHIFT */}
+                <div className="bg-slate-50/70 rounded-2xl border border-slate-200/90 p-4 space-y-3">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-200">
+                    <div className="flex items-center gap-2">
+                      <span className="h-7 w-7 rounded-lg bg-indigo-500/10 text-indigo-600 flex items-center justify-center">
+                        <span className="material-symbols-outlined text-[17px]">nightlight</span>
+                      </span>
+                      <div>
+                        <h4 className="font-display font-extrabold text-xs text-slate-900">Evening Shift</h4>
+                        <span className="text-[10px] text-slate-500">16:00 PM – 20:00 PM</span>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700 font-bold text-[11px]">
+                      {shiftGroups.evening.length} Booked
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5 max-h-[560px] overflow-y-auto pr-1">
+                    {shiftGroups.evening.length === 0 ? (
+                      <div className="py-8 text-center text-xs text-slate-400 bg-white rounded-xl border border-dashed border-slate-200">
+                        No appointments slotted for this shift
+                      </div>
+                    ) : (
+                      shiftGroups.evening.map((r, idx) => (
+                        <div
+                          key={r.id}
+                          className={`p-3 bg-white rounded-xl border border-slate-200/90 border-l-4 transition-all shadow-2xs space-y-2 ${
+                            r.status === 'COMPLETED'
+                              ? 'border-l-emerald-500'
+                              : r.status === 'SCHEDULED'
+                              ? 'border-l-primary'
+                              : 'border-l-amber-500'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                              Slot #{idx + 1} &bull; {16 + Math.floor(idx * 0.5)}:{idx % 2 === 0 ? '00' : '30'} PM
+                            </span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              r.status === 'COMPLETED'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : r.status === 'SCHEDULED'
+                                ? 'bg-sky-100 text-sky-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {r.status}
+                            </span>
+                          </div>
+
+                          <div>
+                            <div className="font-bold text-xs text-slate-900">{r.employee?.name || 'Worker'}</div>
+                            <div className="text-[11px] text-slate-500 truncate">{r.test?.name}</div>
+                          </div>
+
+                          <div className="text-[10px] text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono pt-1 border-t border-slate-100">
+                            <span>ID: {r.employee?.iqamaId || r.employee?.employeeNo || '—'}</span>
+                            <span>&bull;</span>
+                            <span>{r.apptDate ? new Date(r.apptDate).toLocaleDateString() : 'Pending'}</span>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => openScheduleModal(r)}
+                              className="px-2 py-1 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-[11px] font-bold transition-colors cursor-pointer"
+                            >
+                              Reschedule
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDirectExamine(r)}
+                              className="px-2.5 py-1 rounded-lg bg-primary hover:bg-primary-hover text-white text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
+                            >
+                              Examine / Lab
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW MODE 2: FULL TABLE / LIST VIEW */}
+          {schedulerViewMode === 'list' && (
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                  <tr>
+                    <th className="py-3 px-3">Request ID</th>
+                    <th className="py-3 px-3">Candidate</th>
+                    <th className="py-3 px-3">Iqama / Badge</th>
+                    <th className="py-3 px-3">Clinic Facility</th>
+                    <th className="py-3 px-3">Screening Protocol</th>
+                    <th className="py-3 px-3">Appointment Date</th>
+                    <th className="py-3 px-3">Status</th>
+                    <th className="py-3 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredSchedulerRequests.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-slate-400">
+                        No candidate appointments match your filter criteria.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSchedulerRequests.map((r) => (
+                      <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3 px-3 font-mono font-bold text-slate-900">{r.id}</td>
+                        <td className="py-3 px-3 font-bold text-slate-800">{r.employee?.name || 'Worker'}</td>
+                        <td className="py-3 px-3 font-mono text-slate-600">
+                          <div>{r.employee?.iqamaId || '—'}</div>
+                          <div className="text-[10px] text-slate-400 font-mono">{r.employee?.employeeNo}</div>
+                        </td>
+                        <td className="py-3 px-3">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                            {r.vendor?.code || r.vendorId || currentClinic.code}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-slate-700 font-medium">{r.test?.name || 'General Medical'}</td>
+                        <td className="py-3 px-3">
+                          {r.apptDate ? (
+                            <span className="font-semibold text-slate-800">
+                              {new Date(r.apptDate).toLocaleDateString()}
+                              {r.note && (
+                                <span className="block text-[10px] text-slate-500 font-normal truncate max-w-[150px]">
+                                  {r.note}
+                                </span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-[10px] font-bold">
+                              Pending Date
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            r.status === 'COMPLETED'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : r.status === 'SCHEDULED'
+                              ? 'bg-sky-100 text-sky-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {r.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => openScheduleModal(r)}
+                              className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+                              title="Book or reschedule appointment"
+                            >
+                              {r.apptDate ? 'Reschedule' : 'Book Slot'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDirectExamine(r)}
+                              className="px-2.5 py-1 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                            >
+                              Examine
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
       {/* 7. INVOICE CLEARANCE TAB (LIVE SAP BILLING FROM REAL COMPLETED DB ROWS) */}
       {activeSubTab === 'invoice' && (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 border-b border-slate-100 gap-3">
+          {/* Header */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between pb-4 border-b border-slate-100 gap-4">
             <div>
-              <h3 className="font-display font-extrabold text-base text-slate-900">
-                SAP Invoice Generation & 3-Way Match Clearance
-              </h3>
-              <p className="text-xs text-slate-500">
-                Reconcile completed medical examinations with SAP Purchase Contract {currentClinic.contractNo}
+              <div className="flex items-center gap-2">
+                <span className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[20px]">receipt_long</span>
+                </span>
+                <h3 className="font-display font-extrabold text-base text-slate-900">
+                  SAP Invoice Generation & 3-Way Match Clearance
+                </h3>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Reconcile completed medical examinations with SAP Purchase Contract <span className="font-mono font-bold text-slate-700">{currentClinic.contractNo}</span> for <span className="font-semibold text-slate-800">{currentClinic.name}</span>
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 font-medium">Invoice Number:</span>
+            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
+              <span className="text-xs text-slate-500 font-bold ml-1">Invoice Number:</span>
               <input
                 type="text"
                 value={invoiceNo}
                 onChange={(e) => setInvoiceNo(e.target.value)}
-                className="font-mono text-xs font-bold bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg text-slate-800 focus:outline-none focus:border-primary"
+                placeholder="e.g. BAK-2026-091"
+                className="font-mono text-xs font-extrabold bg-white border border-slate-300 px-3 py-1.5 rounded-lg text-slate-900 focus:outline-none focus:border-primary shadow-2xs"
               />
+              <button
+                type="button"
+                onClick={() => setInvoiceNo(`${currentClinic.code || 'INV'}-2026-${String(Math.floor(100 + Math.random() * 900))}`)}
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200 transition-colors"
+                title="Generate new invoice number"
+              >
+                <span className="material-symbols-outlined text-[16px]">autorenew</span>
+              </button>
             </div>
           </div>
 
           {invoiceSuccess && (
-            <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-semibold flex items-center gap-2 animate-fade-in">
-              <span className="material-symbols-outlined text-[18px]">verified</span>
-              <span>{invoiceSuccess}</span>
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 animate-fade-in shadow-2xs">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[20px] text-emerald-600">verified</span>
+                <span>{invoiceSuccess}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInvoiceSuccess('')}
+                className="text-emerald-700 hover:text-emerald-900 text-xs font-bold"
+              >
+                Dismiss
+              </button>
             </div>
           )}
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-              <span>Completed Requests Ready for Billing ({completedRequests.length})</span>
-              {completedRequests.length > 0 && (
-                <button
-                  onClick={() => setBillableRequests(completedRequests.map(r => r.id))}
-                  className="text-primary hover:underline cursor-pointer"
-                >
-                  Select All
-                </button>
-              )}
+          {/* Telemetry KPI Strip */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Ready for Billing</span>
+              <div className="mt-1 flex items-baseline gap-1.5">
+                <span className="font-display font-extrabold text-xl text-slate-900">{completedRequests.length}</span>
+                <span className="text-xs text-slate-500">Candidates</span>
+              </div>
             </div>
 
-            <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Active Cohorts / Slots</span>
+              <div className="mt-1 flex items-baseline gap-1.5">
+                <span className="font-display font-extrabold text-xl text-slate-900">{billableBatches.length}</span>
+                <span className="text-xs text-slate-500">Batches</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Selected for Billing</span>
+              <div className="mt-1 flex items-baseline gap-1.5">
+                <span className="font-display font-extrabold text-xl text-primary">{invoiceSelectedSummary.count}</span>
+                <span className="text-xs text-slate-500">of {completedRequests.length}</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Selected Total (with 15% VAT)</span>
+              <div className="mt-1 flex items-baseline gap-1">
+                <span className="text-xs font-bold text-slate-400">SAR</span>
+                <span className="font-display font-extrabold text-xl text-emerald-700">
+                  {invoiceSelectedSummary.total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* View Mode & Selection Toolbar */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1">
+            {/* Left: View Mode Toggle */}
+            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200/80 shrink-0 self-start">
+              <button
+                type="button"
+                onClick={() => setInvoiceGroupingMode('batch')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  invoiceGroupingMode === 'batch'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[16px] text-primary">folder_copy</span>
+                <span>Grouped by Batch / Slot ({billableBatches.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setInvoiceGroupingMode('flat')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  invoiceGroupingMode === 'flat'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[16px] text-slate-500">table_rows</span>
+                <span>Flat List ({completedRequests.length})</span>
+              </button>
+            </div>
+
+            {/* Right: Quick Selection Actions */}
+            <div className="flex items-center gap-2 text-xs font-bold shrink-0">
+              {completedRequests.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (billableRequests.length === completedRequests.length) {
+                        setBillableRequests([]);
+                      } else {
+                        setBillableRequests(completedRequests.map(r => r.id));
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">
+                      {billableRequests.length === completedRequests.length ? 'deselect' : 'select_all'}
+                    </span>
+                    <span>
+                      {billableRequests.length === completedRequests.length ? 'Deselect All' : `Select All (${completedRequests.length})`}
+                    </span>
+                  </button>
+
+                  {invoiceGroupingMode === 'batch' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const anyCollapsed = billableBatches.some(b => expandedInvoiceBatches[b.batchKey] === false);
+                        const next: Record<string, boolean> = {};
+                        billableBatches.forEach(b => {
+                          next[b.batchKey] = anyCollapsed ? true : false;
+                        });
+                        setExpandedInvoiceBatches(next);
+                      }}
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">unfold_more</span>
+                      <span>Toggle All</span>
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* DEDICATED INVOICE FILTER BAR: TESTS, CLINICS TESTED & REQ ID */}
+          <div className="bg-slate-50/90 border border-slate-200/90 rounded-2xl p-3.5 space-y-2.5 shadow-2xs">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-200/60">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[15px] text-primary">filter_alt</span>
+                <span>Filter Billable Completed Candidates</span>
+              </span>
+              <span className="text-[11px] font-mono font-bold text-slate-500">
+                Matching: {filteredFlatCompletedRequests.length} of {completedRequests.length} Requests
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 text-xs">
+              {/* 1. REQ ID Filter */}
+              <div className="lg:col-span-3">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Filter by Req ID
+                </label>
+                <div className="relative">
+                  <span className="material-symbols-outlined absolute left-2.5 top-2 text-slate-400 text-[16px]">
+                    tag
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Req ID (e.g. REQ-CLR-, SR-)..."
+                    value={invoiceReqIdFilter}
+                    onChange={(e) => setInvoiceReqIdFilter(e.target.value)}
+                    className="w-full pl-8 pr-7 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-primary shadow-2xs"
+                  />
+                  {invoiceReqIdFilter && (
+                    <button
+                      type="button"
+                      onClick={() => setInvoiceReqIdFilter('')}
+                      className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">cancel</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 2. Tests Filter */}
+              <div className="lg:col-span-3">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Filter by Test / Protocol
+                </label>
+                <select
+                  value={invoiceTestFilter}
+                  onChange={(e) => setInvoiceTestFilter(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-800 shadow-2xs focus:outline-none focus:border-primary cursor-pointer truncate"
+                >
+                  <option value="ALL">All Tests &amp; Protocols ({completedRequests.length})</option>
+                  {availableInvoiceTests.map((tName) => {
+                    const count = completedRequests.filter(r => (r.test?.name || '').trim().toLowerCase() === tName.toLowerCase()).length;
+                    return (
+                      <option key={tName} value={tName}>
+                        {tName} ({count})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {/* 3. Clinics Tested Filter */}
+              <div className="lg:col-span-3">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Clinics Tested
+                </label>
+                <select
+                  value={invoiceClinicFilter}
+                  onChange={(e) => {
+                    const targetClinic = e.target.value;
+                    setInvoiceClinicFilter(targetClinic);
+                    if (targetClinic === 'ALL') {
+                      loadClinicData('ALL');
+                    } else {
+                      setSelectedVendorId(targetClinic);
+                      loadClinicData(targetClinic);
+                    }
+                  }}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-800 shadow-2xs focus:outline-none focus:border-primary cursor-pointer truncate"
+                >
+                  <option value="ALL">All Accredited Clinics</option>
+                  {availableInvoiceClinics.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.code} - {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 4. Candidate Search & Clear Actions */}
+              <div className="lg:col-span-3">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Candidate Name / Iqama
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <div className="relative flex-1">
+                    <span className="material-symbols-outlined absolute left-2.5 top-2 text-slate-400 text-[16px]">
+                      search
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Candidate name or Iqama..."
+                      value={invoiceSearchQuery}
+                      onChange={(e) => setInvoiceSearchQuery(e.target.value)}
+                      className="w-full pl-8 pr-7 py-1.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-primary shadow-2xs"
+                    />
+                    {invoiceSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setInvoiceSearchQuery('')}
+                        className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">cancel</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {(invoiceReqIdFilter || invoiceTestFilter !== 'ALL' || invoiceClinicFilter !== 'ALL' || invoiceSearchQuery || selectedInvoiceBatchFilter !== 'ALL') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInvoiceReqIdFilter('');
+                        setInvoiceTestFilter('ALL');
+                        setInvoiceClinicFilter('ALL');
+                        setInvoiceSearchQuery('');
+                        setSelectedInvoiceBatchFilter('ALL');
+                      }}
+                      title="Reset all filters"
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-colors cursor-pointer shrink-0"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Optional Cohort Batch Selector (Secondary Filter) */}
+            {billableBatches.length > 1 && (
+              <div className="flex items-center gap-2 pt-1 border-t border-slate-200/50 text-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0">
+                  Cohort / Slot Batch:
+                </span>
+                <select
+                  value={selectedInvoiceBatchFilter}
+                  onChange={(e) => setSelectedInvoiceBatchFilter(e.target.value)}
+                  className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-semibold text-slate-700 focus:outline-none focus:border-primary cursor-pointer truncate max-w-md shadow-2xs"
+                >
+                  <option value="ALL">All Batches &amp; Cohorts ({billableBatches.length})</option>
+                  {billableBatches.map(b => (
+                    <option key={b.batchKey} value={b.batchKey}>
+                      {b.isSlot ? '📅 Slot: ' : b.isBulk ? '📁 ' : '📋 '}
+                      {b.batchTitle} ({b.requests.length} candidates)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* ============================================================== */}
+          {/* VIEW 1: BATCH / SLOT WISE ACCORDION CARDS (DEFAULT & RECOMMENDED) */}
+          {/* ============================================================== */}
+          {invoiceGroupingMode === 'batch' && (
+            <div className="space-y-3.5 pt-1">
+              {filteredBillableBatches.length === 0 ? (
+                <div className="py-10 text-center text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  <span className="material-symbols-outlined text-[32px] text-slate-300 mb-1">inventory_2</span>
+                  <p className="text-xs font-semibold text-slate-600">No completed examinations match the search criteria.</p>
+                </div>
+              ) : (
+                filteredBillableBatches.map((batch) => {
+                  const isExpanded = expandedInvoiceBatches[batch.batchKey] !== false;
+                  const batchIds = batch.requests.map(r => r.id);
+                  const selectedInBatch = batch.requests.filter(r => billableRequests.includes(r.id)).length;
+                  const isAllSelected = selectedInBatch === batch.requests.length && batch.requests.length > 0;
+                  const isPartial = selectedInBatch > 0 && selectedInBatch < batch.requests.length;
+
+                  return (
+                    <div
+                      key={batch.batchKey}
+                      className={`bg-white rounded-2xl border transition-all shadow-2xs overflow-hidden ${
+                        selectedInBatch > 0 ? 'border-primary/40 ring-1 ring-primary/20' : 'border-slate-200'
+                      }`}
+                    >
+                      {/* BATCH HEADER BAR */}
+                      <div
+                        onClick={() => toggleInvoiceBatchExpand(batch.batchKey)}
+                        className={`p-3.5 sm:p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3 cursor-pointer select-none transition-colors ${
+                          selectedInBatch > 0 ? 'bg-primary/5 hover:bg-primary/10' : 'bg-slate-50/80 hover:bg-slate-100/80'
+                        }`}
+                      >
+                        {/* Left: Checkbox + Origin Badge + Title */}
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={isAllSelected}
+                            ref={(el) => {
+                              if (el) el.indeterminate = isPartial;
+                            }}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              handleToggleBatchRequests(batch.requests);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-4.5 w-4.5 rounded accent-primary cursor-pointer shrink-0"
+                          />
+
+                          <div className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                            batch.isSlot
+                              ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : batch.isBulk
+                              ? 'bg-teal-50 text-teal-700 border-teal-200'
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                          }`}>
+                            <span className="material-symbols-outlined text-[19px]">
+                              {batch.isSlot ? 'event_available' : batch.isBulk ? 'inventory_2' : 'badge'}
+                            </span>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider border ${
+                                batch.isSlot
+                                  ? 'bg-amber-100/80 text-amber-900 border-amber-300'
+                                  : batch.isBulk
+                                  ? 'bg-teal-100/80 text-teal-900 border-teal-300'
+                                  : 'bg-blue-100/80 text-blue-900 border-blue-300'
+                              }`}>
+                                {batch.isSlot ? `Slot Request: ${batch.batchKey}` : batch.isBulk ? `Cohort Batch: ${batch.batchKey}` : 'Master Roster'}
+                              </span>
+
+                              <h4 className="font-display font-extrabold text-sm text-slate-900">
+                                {batch.batchTitle}
+                              </h4>
+                            </div>
+
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              {batch.requests.length} completed examination{batch.requests.length > 1 ? 's' : ''} ready for billing
+                              {selectedInBatch > 0 && (
+                                <span className="font-bold text-primary ml-1.5">
+                                  &bull; {selectedInBatch} of {batch.requests.length} selected for invoice
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Right: Subtotal + Actions + Expand Toggle */}
+                        <div className="flex items-center justify-between md:justify-end gap-3 shrink-0">
+                          {/* Financial Subtotal for this Batch */}
+                          <div className="text-left md:text-right">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                              Batch Total (incl. 15% VAT)
+                            </div>
+                            <div className="font-mono font-extrabold text-sm text-slate-900">
+                              SAR {batch.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div className="text-[10.5px] text-slate-500 font-mono">
+                              Subtotal: SAR {batch.totalSubtotal.toFixed(2)} + VAT: SAR {batch.totalVat.toFixed(2)}
+                            </div>
+                          </div>
+
+                          {/* Quick Bill Action */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setBillableRequests(batchIds);
+                              setInvoiceNo(`${currentClinic.code || 'BAK'}-${batch.batchKey}-${String(Math.floor(100 + Math.random() * 900))}`);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-200/80 border border-slate-300 text-slate-700 text-xs font-bold transition-colors cursor-pointer shadow-2xs whitespace-nowrap hidden sm:inline-flex items-center gap-1"
+                            title="Select only this batch and set invoice reference"
+                          >
+                            <span className="material-symbols-outlined text-[15px] text-secondary">flash_on</span>
+                            <span>Bill Only This Batch</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleInvoiceBatchExpand(batch.batchKey);
+                            }}
+                            className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors"
+                          >
+                            <span className="material-symbols-outlined text-[20px]">
+                              {isExpanded ? 'expand_less' : 'expand_more'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* BATCH CANDIDATE TABLE (WHEN EXPANDED) */}
+                      {isExpanded && (
+                        <div className="border-t border-slate-100 overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-50/80 text-slate-500 uppercase text-[10px] font-bold tracking-wider border-b border-slate-100">
+                              <tr>
+                                <th className="py-2.5 px-3.5 w-10">Select</th>
+                                <th className="py-2.5 px-3.5">Request ID</th>
+                                <th className="py-2.5 px-3.5">Candidate Details</th>
+                                <th className="py-2.5 px-3.5">Clinic Tested</th>
+                                <th className="py-2.5 px-3.5">Department</th>
+                                <th className="py-2.5 px-3.5">Screening Protocol</th>
+                                <th className="py-2.5 px-3.5 text-right">Contract Rate</th>
+                                <th className="py-2.5 px-3.5 text-center">Outcome</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 font-medium">
+                              {batch.requests.map((r: any) => {
+                                const isSelected = billableRequests.includes(r.id);
+                                const rate = getCandidateRate(r);
+
+                                return (
+                                  <tr
+                                    key={r.id}
+                                    onClick={() => {
+                                      if (isSelected) {
+                                        setBillableRequests(billableRequests.filter(id => id !== r.id));
+                                      } else {
+                                        setBillableRequests([...billableRequests, r.id]);
+                                      }
+                                    }}
+                                    className={`transition-colors cursor-pointer ${
+                                      isSelected ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    <td className="py-2.5 px-3.5">
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => {}}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="h-4 w-4 rounded accent-primary cursor-pointer"
+                                      />
+                                    </td>
+                                    <td className="py-2.5 px-3.5 font-mono font-extrabold text-slate-900">
+                                      {r.id}
+                                    </td>
+                                    <td className="py-2.5 px-3.5">
+                                      <div className="font-bold text-slate-900">{r.employee?.name || 'Worker'}</div>
+                                      <div className="text-[11px] font-mono text-slate-400">
+                                        SAP: {r.employee?.employeeNo} &bull; Iqama: {r.employee?.iqamaId || '—'}
+                                      </div>
+                                    </td>
+                                    <td className="py-2.5 px-3.5">
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                        <span className="material-symbols-outlined text-[12px] text-slate-400">local_hospital</span>
+                                        {r.vendor?.code || r.vendorId || currentClinic.code}
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 px-3.5 text-slate-600">
+                                      {r.department || r.employee?.department || 'Operations'}
+                                    </td>
+                                    <td className="py-2.5 px-3.5 font-semibold text-slate-800">
+                                      {r.test?.name || 'Occupational Medical Examination'}
+                                    </td>
+                                    <td className="py-2.5 px-3.5 text-right font-mono font-extrabold text-slate-900">
+                                      SAR {rate.toFixed(2)}
+                                    </td>
+                                    <td className="py-2.5 px-3.5 text-center">
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                        <span className="material-symbols-outlined text-[13px] text-emerald-600">check_circle</span>
+                                        <span>FIT (ISSUED)</span>
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* VIEW 2: FLAT LIST TABLE (FOR CLASSIC AUDIT / QUICK INSPECTION) */}
+          {/* ============================================================== */}
+          {invoiceGroupingMode === 'flat' && (
+            <div className="overflow-x-auto rounded-xl border border-slate-200 pt-1">
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-100/80 text-slate-600 uppercase font-bold text-[10.5px]">
                   <tr>
-                    <th className="py-2.5 px-3">Select</th>
+                    <th className="py-2.5 px-3 w-10">Select</th>
                     <th className="py-2.5 px-3">Request ID</th>
                     <th className="py-2.5 px-3">Candidate</th>
+                    <th className="py-2.5 px-3">Clinic Tested</th>
                     <th className="py-2.5 px-3">Screening Protocol</th>
-                    <th className="py-2.5 px-3">Contract Rate</th>
-                    <th className="py-2.5 px-3">Outcome</th>
+                    <th className="py-2.5 px-3">Batch / Slot Ref</th>
+                    <th className="py-2.5 px-3 text-right">Contract Rate</th>
+                    <th className="py-2.5 px-3 text-center">Outcome</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
-                  {completedRequests.length === 0 ? (
+                  {filteredFlatCompletedRequests.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-6 text-center text-slate-400">
-                        No completed medical examinations available for billing yet. Issue cards on candidates first.
+                      <td colSpan={8} className="py-8 text-center text-slate-400">
+                        No completed medical examinations available for billing matching filter.
                       </td>
                     </tr>
                   ) : (
-                    completedRequests.map((r) => {
+                    filteredFlatCompletedRequests.map((r: any) => {
                       const isSelected = billableRequests.includes(r.id);
-                      const testObj = testsList.find((t: any) => t.id === r.testId);
-                      const matchedRate = testObj?.rates?.find((rt: any) => rt.contract?.vendor?.id === selectedVendorId)?.rate;
-                      const displayRate = matchedRate != null ? `SAR ${Number(matchedRate).toFixed(2)}` : 'SAR 100.00';
+                      const rate = getCandidateRate(r);
+                      let meta: any = {};
+                      if (r.note) {
+                        try { meta = typeof r.note === 'string' ? JSON.parse(r.note) : r.note; } catch (_) {}
+                      }
+                      const batchRef = meta.slotRequestId || meta.batchId || (r.id.startsWith('SR-') ? r.id.split('-').slice(0, 2).join('-') : 'Ad-hoc');
+
                       return (
-                        <tr key={r.id} className="hover:bg-slate-50 transition-colors">
+                        <tr
+                          key={r.id}
+                          onClick={() => {
+                            if (isSelected) {
+                              setBillableRequests(billableRequests.filter(id => id !== r.id));
+                            } else {
+                              setBillableRequests([...billableRequests, r.id]);
+                            }
+                          }}
+                          className={`hover:bg-slate-50 transition-colors cursor-pointer ${
+                            isSelected ? 'bg-primary/5' : ''
+                          }`}
+                        >
                           <td className="py-2.5 px-3">
                             <input
                               type="checkbox"
                               checked={isSelected}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setBillableRequests([...billableRequests, r.id]);
-                                } else {
-                                  setBillableRequests(billableRequests.filter(id => id !== r.id));
-                                }
-                              }}
-                              className="h-4 w-4 rounded accent-primary"
+                              onChange={() => {}}
+                              onClick={(e) => e.stopPropagation()}
+                              className="h-4 w-4 rounded accent-primary cursor-pointer"
                             />
                           </td>
                           <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{r.id}</td>
-                          <td className="py-2.5 px-3 font-bold text-slate-800">{r.employee?.name}</td>
-                          <td className="py-2.5 px-3 text-slate-600">{r.test?.name}</td>
-                          <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{displayRate}</td>
                           <td className="py-2.5 px-3">
+                            <div className="font-bold text-slate-800">{r.employee?.name || 'Worker'}</div>
+                            <div className="text-[11px] font-mono text-slate-400">
+                              SAP: {r.employee?.employeeNo} &bull; Iqama: {r.employee?.iqamaId || '—'}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                              <span className="material-symbols-outlined text-[12px] text-slate-400">local_hospital</span>
+                              {r.vendor?.code || r.vendorId || currentClinic.code}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-700 font-medium">{r.test?.name || 'Occupational Medical Test'}</td>
+                          <td className="py-2.5 px-3">
+                            <span className="font-mono text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                              {batchRef}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-bold text-slate-900 text-right">
+                            SAR {rate.toFixed(2)}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
                               FIT (ISSUED)
                             </span>
@@ -2097,21 +4061,81 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 </tbody>
               </table>
             </div>
+          )}
 
-            {completedRequests.length > 0 && (
-              <div className="flex justify-end pt-2">
+          {/* STICKY / BOTTOM FINANCIAL SUMMARY & INVOICE SUBMIT BAR */}
+          {completedRequests.length > 0 && (
+            <div className="mt-4 p-4 rounded-2xl bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-md">
+              <div className="flex items-center gap-4 flex-wrap">
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Selected for Invoice
+                  </div>
+                  <div className="font-display font-extrabold text-base text-white">
+                    {invoiceSelectedSummary.count} <span className="text-xs text-slate-300 font-normal">of {completedRequests.length} Candidates</span>
+                  </div>
+                </div>
+
+                <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
+
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Subtotal (Base)
+                  </div>
+                  <div className="font-mono font-bold text-sm text-slate-200">
+                    SAR {invoiceSelectedSummary.subtotal.toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
+
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    15% Standard VAT
+                  </div>
+                  <div className="font-mono font-bold text-sm text-slate-300">
+                    SAR {invoiceSelectedSummary.vat.toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
+
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-teal-400">
+                    Total Invoice Amount
+                  </div>
+                  <div className="font-mono font-extrabold text-base text-teal-300">
+                    SAR {invoiceSelectedSummary.total.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
                 <button
                   type="button"
                   disabled={submittingInvoice || billableRequests.length === 0}
                   onClick={handleSubmitInvoice}
-                  className="px-5 py-2.5 rounded-xl bg-secondary hover:bg-secondary-hover text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                  className={`px-5 py-2.5 rounded-xl font-bold text-xs shadow-md transition-all flex items-center gap-2 ${
+                    submittingInvoice || billableRequests.length === 0
+                      ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                      : 'bg-secondary hover:bg-secondary-hover text-white cursor-pointer active:scale-95'
+                  }`}
                 >
-                  <span className="material-symbols-outlined text-[17px]">send</span>
-                  <span>Submit Invoice to Finance ({billableRequests.length} Selected)</span>
+                  {submittingInvoice ? (
+                    <>
+                      <span className="material-symbols-outlined text-[17px] animate-spin">progress_activity</span>
+                      <span>Submitting to Finance...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[17px]">send</span>
+                      <span>Submit Invoice to Finance ({billableRequests.length} Selected)</span>
+                    </>
+                  )}
                 </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -2591,31 +4615,120 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
       {/* SCHEDULE APPOINTMENT QUICK MODAL */}
       {apptModalId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-5 space-y-4">
-            <h3 className="font-display font-bold text-base text-slate-900">
-              Schedule Candidate Exam
-            </h3>
-            <p className="text-xs text-slate-500">
-              Select date for candidate examination at {currentClinic.name}
-            </p>
-            <input
-              type="date"
-              value={apptDate}
-              onChange={(e) => setApptDate(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 p-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-primary"
-            />
-            <div className="flex justify-end gap-2 pt-2">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[20px]">calendar_month</span>
+                </span>
+                <div>
+                  <h3 className="font-display font-extrabold text-base text-slate-900">
+                    Schedule Candidate Appointment
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {currentClinic.name} ({currentClinic.code})
+                  </p>
+                </div>
+              </div>
               <button
+                type="button"
                 onClick={() => setApptModalId(null)}
-                className="px-3.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer"
+                className="text-slate-400 hover:text-slate-700 transition-colors p-1 rounded-lg cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            {/* Candidate Details Card */}
+            {schedulingReq && (
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-900">
+                    {schedulingReq.employee?.name || 'Worker'}
+                  </span>
+                  <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded">
+                    {schedulingReq.id}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
+                  <span>Iqama: <strong className="text-slate-700">{schedulingReq.employee?.iqamaId || '—'}</strong></span>
+                  <span>Badge: <strong className="text-slate-700">{schedulingReq.employee?.employeeNo || '—'}</strong></span>
+                  <span>Protocol: <strong className="text-slate-700">{schedulingReq.test?.name || 'Occupational Fitness'}</strong></span>
+                </div>
+              </div>
+            )}
+
+            {/* Date Picker & Quick Buttons */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold text-slate-700">Appointment Date</label>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setApptDate(new Date().toISOString().slice(0, 10))}
+                    className="text-[10px] font-bold text-primary hover:underline px-1.5 py-0.5 rounded bg-primary/5 cursor-pointer"
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setApptDate(new Date(Date.now() + 86400000).toISOString().slice(0, 10))}
+                    className="text-[10px] font-bold text-slate-600 hover:underline px-1.5 py-0.5 rounded bg-slate-100 cursor-pointer"
+                  >
+                    Tomorrow
+                  </button>
+                </div>
+              </div>
+              <input
+                type="date"
+                value={apptDate}
+                onChange={(e) => setApptDate(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-primary shadow-2xs"
+              />
+            </div>
+
+            {/* Shift Picker */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Clinic Shift Slot</label>
+              <select
+                value={apptShift}
+                onChange={(e) => setApptShift(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-primary shadow-2xs bg-white cursor-pointer"
+              >
+                <option value="Morning (08:00 - 12:00)">Morning Shift (08:00 AM - 12:00 PM)</option>
+                <option value="Afternoon (12:00 - 16:00)">Afternoon Shift (12:00 PM - 04:00 PM)</option>
+                <option value="Evening (16:00 - 20:00)">Evening Shift (04:00 PM - 08:00 PM)</option>
+              </select>
+            </div>
+
+            {/* Notes / Special Instructions */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Special Notes / Fasting Instructions</label>
+              <input
+                type="text"
+                value={apptNote}
+                onChange={(e) => setApptNote(e.target.value)}
+                placeholder="e.g. 10hr fasting required for glucose & lipid profile"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-primary shadow-2xs"
+              />
+            </div>
+
+            {/* Actions */}
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setApptModalId(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleScheduleAppt}
-                className="px-4 py-1.5 rounded-lg bg-primary text-white text-xs font-bold cursor-pointer"
+                disabled={!apptDate}
+                className="px-5 py-2 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
               >
-                Confirm Appointment
+                Confirm Appointment Slot
               </button>
             </div>
           </div>
