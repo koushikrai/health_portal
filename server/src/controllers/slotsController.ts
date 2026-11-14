@@ -18,7 +18,12 @@ export class SlotsController {
       const expiryDays = settings.slotExpiryDays || 7;
       const now = new Date();
 
-      const slotRequests = await SlotRepository.listOrderByIdDesc();
+      const slotRequestsRaw = await SlotRepository.list();
+      const slotRequests = [...slotRequestsRaw].sort((a, b) => {
+        const tsDiff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        if (tsDiff !== 0) return tsDiff;
+        return b.id.localeCompare(a.id, undefined, { numeric: true });
+      });
 
       // Fetch all active vendors (specifically the 4 in the screenshot: ARZ, BAK, DINA, GAMC + JMC)
       const vendors = await VendorRepository.listActive();

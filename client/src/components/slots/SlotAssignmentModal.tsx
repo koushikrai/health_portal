@@ -2,6 +2,15 @@ import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { api } from '../../api/client';
 
+export interface SlotWorkforcePanelProps {
+  slotId: string;
+  isActive?: boolean;
+  inline?: boolean;
+  onClose?: () => void;
+  onAssignmentUpdated?: () => void;
+  onGoToSlotPortal?: () => void;
+}
+
 interface SlotAssignmentModalProps {
   slotId: string;
   isOpen: boolean;
@@ -9,13 +18,15 @@ interface SlotAssignmentModalProps {
   onAssignmentUpdated?: () => void;
 }
 
-export const SlotAssignmentModal: React.FC<SlotAssignmentModalProps> = ({
+export const SlotWorkforcePanel: React.FC<SlotWorkforcePanelProps> = ({
   slotId,
-  isOpen,
+  isActive = true,
+  inline = false,
   onClose,
-  onAssignmentUpdated
+  onAssignmentUpdated,
+  onGoToSlotPortal
 }) => {
-  const [activeTab, setActiveTab] = useState<'single' | 'bulk' | 'list'>('single');
+  const [activeTab, setActiveTab] = useState<'single' | 'bulk' | 'list'>('bulk');
   const [loading, setLoading] = useState(false);
   const [slotData, setSlotData] = useState<any>(null);
   const [assignments, setAssignments] = useState<any[]>([]);
@@ -48,11 +59,19 @@ export const SlotAssignmentModal: React.FC<SlotAssignmentModalProps> = ({
   const [assignedFilter, setAssignedFilter] = useState('');
 
   useEffect(() => {
-    if (isOpen && slotId) {
+    if (isActive && slotId) {
+      // Reset transient selection state when switching slot IDs
+      setSelectedEmp(null);
+      setSearchEmployeeQuery('');
+      setSelectedRosterIds(new Set());
+      setPastedBadges('');
+      setFeedbackMessage(null);
+      setSingleClinicId('AUTO');
+      setBulkClinicId('AUTO');
       loadSlotDetails();
       loadRoster();
     }
-  }, [isOpen, slotId]);
+  }, [isActive, slotId]);
 
   const showFeedback = (type: 'success' | 'error', text: string) => {
     setFeedbackMessage({ type, text });
@@ -289,7 +308,7 @@ export const SlotAssignmentModal: React.FC<SlotAssignmentModalProps> = ({
     XLSX.writeFile(wb, `${slotId}_Assigned_Employees.xlsx`);
   };
 
-  if (!isOpen) return null;
+  if (!isActive || !slotId) return null;
 
   const totalAssigned = slotData?.totalAssigned || assignments.length;
   const requestedSlots = slotData?.requestedSlots || 0;
@@ -309,9 +328,52 @@ export const SlotAssignmentModal: React.FC<SlotAssignmentModalProps> = ({
   });
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-4xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
-        {/* Modal Top Header */}
+    <div className={inline ? 'bg-white rounded-2xl border border-slate-200/90 shadow-2xs overflow-hidden flex flex-col w-full' : 'bg-white rounded-3xl max-w-4xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]'}>
+      {/* Top Header */}
+      {inline ? (
+        <div className="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl bg-orange-50 text-orange-600 border border-orange-200 flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined text-[20px]">group_add</span>
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-mono text-xs font-extrabold text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-md">
+                  {slotId}
+                </span>
+                <h3 className="font-display font-extrabold text-base text-slate-900">
+                  {slotData?.title || 'Booked Slot Workforce Assignment'}
+                </h3>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {slotData?.department || 'Operations'} &bull; {slotData?.plant || 'Sadara Complex'} &bull; Need-by: {slotData?.needByDate ? new Date(slotData.needByDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'TBD'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {onGoToSlotPortal && (
+              <button
+                type="button"
+                onClick={onGoToSlotPortal}
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs border border-slate-200 transition-colors cursor-pointer flex items-center gap-1"
+              >
+                <span className="material-symbols-outlined text-[15px]">tune</span>
+                <span>Adjust Clinic Split</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={loadSlotDetails}
+              disabled={loading}
+              className="p-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 cursor-pointer"
+              title="Refresh Slot Details"
+            >
+              <span className={`material-symbols-outlined text-[17px] ${loading ? 'animate-spin' : ''}`}>refresh</span>
+            </button>
+          </div>
+        </div>
+      ) : (
         <div className="bg-gradient-to-r from-slate-900 via-[#10192e] to-slate-900 text-white px-6 py-5 flex items-center justify-between border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-2xl bg-orange-500/20 text-orange-400 border border-orange-500/30 flex items-center justify-center">
@@ -332,70 +394,89 @@ export const SlotAssignmentModal: React.FC<SlotAssignmentModalProps> = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
-          >
-            <span className="material-symbols-outlined text-[18px]">close</span>
-          </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[18px]">close</span>
+            </button>
+          )}
         </div>
+      )}
 
-        {/* Quota Progress & Clinic Capacity Bar */}
-        <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 shrink-0 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                Slot Quota Fulfillment
+      {/* Quota Progress & Clinic Capacity Bar */}
+      <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 shrink-0 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              Slot Quota Fulfillment
+            </span>
+            <div className="flex items-baseline gap-2 mt-0.5">
+              <span className="text-2xl font-display font-black text-slate-900">
+                {totalAssigned} <span className="text-sm font-normal text-slate-500">/ {requestedSlots} Assigned</span>
               </span>
-              <div className="flex items-baseline gap-2 mt-0.5">
-                <span className="text-2xl font-display font-black text-slate-900">
-                  {totalAssigned} <span className="text-sm font-normal text-slate-500">/ {requestedSlots} Assigned</span>
-                </span>
-                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                  remainingSlots === 0
-                    ? 'bg-emerald-100 text-emerald-800'
-                    : 'bg-orange-100 text-orange-800'
-                }`}>
-                  {remainingSlots} slots remaining
-                </span>
-              </div>
-            </div>
-
-            <div className="w-full sm:w-64">
-              <div className="flex justify-between text-[11px] font-semibold text-slate-600 mb-1">
-                <span>Allocation Progress</span>
-                <span>{percentAssigned}%</span>
-              </div>
-              <div className="h-2.5 w-full bg-slate-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-orange-500 to-emerald-500 transition-all duration-500 rounded-full"
-                  style={{ width: `${percentAssigned}%` }}
-                ></div>
-              </div>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                remainingSlots === 0
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-orange-100 text-orange-800'
+              }`}>
+                {remainingSlots} slots remaining
+              </span>
             </div>
           </div>
 
-          {/* Clinics Quota Breakdown Pills */}
-          {clinicStats.length > 0 && (
-            <div className="pt-2 border-t border-slate-200 flex flex-wrap gap-2 items-center">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Approved Clinics:
-              </span>
-              {clinicStats.map((c: any) => (
-                <div
-                  key={c.vendorId}
-                  className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs flex items-center gap-1.5 shadow-xs"
-                >
-                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                  <span className="font-semibold text-slate-800">{c.vendorName}:</span>
-                  <span className="font-mono font-bold text-slate-900">{c.assignedSlots || 0}/{c.allocatedSlots}</span>
-                  <span className="text-[10px] text-slate-400">({c.remainingSlots} left)</span>
-                </div>
-              ))}
+          <div className="w-full sm:w-64">
+            <div className="flex justify-between text-[11px] font-semibold text-slate-600 mb-1">
+              <span>Allocation Progress</span>
+              <span>{percentAssigned}%</span>
             </div>
-          )}
+            <div className="h-2.5 w-full bg-slate-200 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-orange-500 to-emerald-500 transition-all duration-500 rounded-full"
+                style={{ width: `${percentAssigned}%` }}
+              ></div>
+            </div>
+          </div>
         </div>
+
+        {/* Clinics Quota Breakdown Pills */}
+        {clinicStats.length > 0 ? (
+          <div className="pt-2 border-t border-slate-200 flex flex-wrap gap-2 items-center">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              Approved Clinics:
+            </span>
+            {clinicStats.map((c: any) => (
+              <div
+                key={c.vendorId}
+                className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs flex items-center gap-1.5 shadow-xs"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span className="font-semibold text-slate-800">{c.vendorName}:</span>
+                <span className="font-mono font-bold text-slate-900">{c.assignedSlots || 0}/{c.allocatedSlots}</span>
+                <span className="text-[10px] text-slate-400">({c.remainingSlots} left)</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="pt-2 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-800 bg-amber-50/80 px-3 py-2 rounded-xl border border-amber-200">
+            <div className="flex items-center gap-1.5 font-semibold">
+              <span className="material-symbols-outlined text-[16px] text-amber-600">info</span>
+              <span>No clinic split confirmed yet for this slot request. Allocate across clinics in Slot Portal first, or Auto-Assign will route to default clinic.</span>
+            </div>
+            {onGoToSlotPortal && (
+              <button
+                type="button"
+                onClick={onGoToSlotPortal}
+                className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] cursor-pointer"
+              >
+                Split Clinics &rarr;
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
         {/* Feedback Alert */}
         {feedbackMessage && (
@@ -926,12 +1007,13 @@ export const SlotAssignmentModal: React.FC<SlotAssignmentModalProps> = ({
           )}
         </div>
 
-        {/* Modal Footer */}
-        <div className="bg-slate-50 border-t border-slate-200 px-6 py-3.5 flex items-center justify-between shrink-0">
-          <div className="text-xs text-slate-500">
-            Total Quota: <strong>{requestedSlots}</strong> &bull; Assigned: <strong>{totalAssigned}</strong> &bull; Vacant: <strong className="text-emerald-700">{remainingSlots}</strong>
-          </div>
+      {/* Footer */}
+      <div className="bg-slate-50 border-t border-slate-200 px-6 py-3.5 flex items-center justify-between shrink-0">
+        <div className="text-xs text-slate-500">
+          Total Quota: <strong>{requestedSlots}</strong> &bull; Assigned: <strong>{totalAssigned}</strong> &bull; Vacant: <strong className="text-emerald-700">{remainingSlots}</strong>
+        </div>
 
+        {!inline && onClose && (
           <button
             type="button"
             onClick={onClose}
@@ -939,8 +1021,29 @@ export const SlotAssignmentModal: React.FC<SlotAssignmentModalProps> = ({
           >
             Done
           </button>
-        </div>
+        )}
       </div>
+    </div>
+  );
+};
+
+export const SlotAssignmentModal: React.FC<SlotAssignmentModalProps> = ({
+  slotId,
+  isOpen,
+  onClose,
+  onAssignmentUpdated
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+      <SlotWorkforcePanel
+        slotId={slotId}
+        isActive={isOpen}
+        inline={false}
+        onClose={onClose}
+        onAssignmentUpdated={onAssignmentUpdated}
+      />
     </div>
   );
 };

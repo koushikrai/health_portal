@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { api } from '../../api/client';
 import { CertificateModal } from '../certificate/CertificateModal';
 import { PdfReportViewerModal } from '../certificate/PdfReportViewerModal';
+import { useInfiniteSlice, InfiniteScrollSentinel } from '../common/InfiniteScrollSentinel';
 
 interface MedicalDispatchDashboardProps {
   userRole?: string;
@@ -318,19 +319,27 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
   const [invoiceTestFilter, setInvoiceTestFilter] = useState<string>('ALL');
   const [invoiceClinicFilter, setInvoiceClinicFilter] = useState<string>('ALL');
 
-  // Inbound Requests Filters
+  // Inbound Requests Filters, Grouping & Realtime Sync
+  const [inboundGroupingMode, setInboundGroupingMode] = useState<'batch' | 'flat'>('batch');
+  const [expandedInboundBatches, setExpandedInboundBatches] = useState<Record<string, boolean>>({});
+  const [selectedInboundBatchFilter, setSelectedInboundBatchFilter] = useState<string>('ALL');
   const [inboundReqIdFilter, setInboundReqIdFilter] = useState<string>('');
   const [inboundTestFilter, setInboundTestFilter] = useState<string>('ALL');
   const [inboundClinicFilter, setInboundClinicFilter] = useState<string>('ALL');
   const [inboundStatusFilter, setInboundStatusFilter] = useState<string>('ALL');
   const [inboundSearchQuery, setInboundSearchQuery] = useState<string>('');
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState<boolean>(true);
+  const [isSyncingLive, setIsSyncingLive] = useState<boolean>(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
 
   // Clinic Slot Scheduler State
   const [schedulerDateFilter, setSchedulerDateFilter] = useState<'ALL' | 'TODAY' | 'TOMORROW' | 'WEEK' | 'CUSTOM'>('ALL');
   const [schedulerCustomDate, setSchedulerCustomDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [schedulerStatusFilter, setSchedulerStatusFilter] = useState<'ALL' | 'SCHEDULED' | 'PENDING' | 'COMPLETED'>('ALL');
   const [schedulerSearch, setSchedulerSearch] = useState<string>('');
-  const [schedulerViewMode, setSchedulerViewMode] = useState<'shifts' | 'list'>('shifts');
+  const [schedulerViewMode, setSchedulerViewMode] = useState<'batch' | 'shifts' | 'list'>('batch');
+  const [selectedSchedulerBatchFilter, setSelectedSchedulerBatchFilter] = useState<string>('ALL');
+  const [expandedSchedulerBatches, setExpandedSchedulerBatches] = useState<Record<string, boolean>>({});
   const [apptShift, setApptShift] = useState<string>('Morning (08:00 - 12:00)');
   const [apptNote, setApptNote] = useState<string>('');
 
@@ -407,20 +416,27 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
     setInvoiceTestFilter('ALL');
     setInvoiceClinicFilter(selectedVendorId || 'ALL');
     setBillableRequests([]);
-    // Inbound filters reset
+    // Inbound & Scheduler filters reset
+    setSelectedInboundBatchFilter('ALL');
     setInboundReqIdFilter('');
     setInboundTestFilter('ALL');
     setInboundClinicFilter(selectedVendorId || 'ALL');
     setInboundStatusFilter('ALL');
     setInboundSearchQuery('');
+    setSelectedSchedulerBatchFilter('ALL');
   }, [selectedVendorId, currentClinic.code]);
 
-  const loadClinicData = async (vId = selectedVendorId) => {
-    setLoading(true);
+  const loadClinicData = async (vId = selectedVendorId, silent = false) => {
+    if (silent) {
+      setIsSyncingLive(true);
+    } else {
+      setLoading(true);
+    }
     try {
       const res = await api.getRequests({ vendorId: vId });
       const reqList = res.data?.requests || [];
       setRequests(reqList);
+      setLastSyncedAt(new Date());
 
       // Auto-select first request if active candidate is not in list
       if (reqList.length > 0) {
@@ -433,9 +449,40 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
     } catch (e) {
       console.error('Failed to load clinic requests:', e);
     } finally {
-      setLoading(false);
+      if (silent) {
+        setIsSyncingLive(false);
+      } else {
+        setLoading(false);
+      }
     }
   };
+
+  // Realtime auto-polling (every 8s) & tab-focus sync so newly assigned requests appear automatically
+  useEffect(() => {
+    if (!autoRefreshEnabled) return;
+    const effectiveVendor =
+      activeSubTab === 'inbound' && inboundClinicFilter === 'ALL' ? 'ALL' : selectedVendorId;
+
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadClinicData(effectiveVendor, true);
+      }
+    }, 8000);
+
+    const handleFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        loadClinicData(effectiveVendor, true);
+      }
+    };
+
+    window.addEventListener('focus', handleFocusOrVisible);
+    document.addEventListener('visibilitychange', handleFocusOrVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', handleFocusOrVisible);
+      document.removeEventListener('visibilitychange', handleFocusOrVisible);
+    };
+  }, [autoRefreshEnabled, selectedVendorId, activeSubTab, inboundClinicFilter]);
 
   // 3. Helper to parse diagnostic lab values from request report or notes
   const parseLabData = (r: any): LabData => {
@@ -720,6 +767,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
     doneCount: number;
     pendingCount: number;
     unbilledCount: number;
+    latestTs: number;
   }
 
   const bulkDateGroups = useMemo(() => {
@@ -756,6 +804,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
       }
 
       const groupKey = `${dateKey}_${batchTitle}`;
+      const candTs = rawDate ? new Date(rawDate).getTime() : 0;
       if (!groups[groupKey]) {
         groups[groupKey] = {
           dateKey: groupKey,
@@ -765,8 +814,11 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
           totalCount: 0,
           doneCount: 0,
           pendingCount: 0,
-          unbilledCount: 0
+          unbilledCount: 0,
+          latestTs: candTs
         };
+      } else if (candTs > groups[groupKey].latestTs) {
+        groups[groupKey].latestTs = candTs;
       }
 
       groups[groupKey].candidates.push(c);
@@ -783,7 +835,10 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
       }
     });
 
-    return Object.values(groups).sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+    return Object.values(groups).sort((a, b) => {
+      if (b.latestTs !== a.latestTs) return b.latestTs - a.latestTs;
+      return b.dateKey.localeCompare(a.dateKey);
+    });
   }, [filteredBulkCandidates]);
 
   // Available Test Protocols / Designs across all candidates
@@ -1230,9 +1285,114 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
     return Array.from(map.values()).sort((a, b) => a.code.localeCompare(b.code));
   }, [clinics, requests]);
 
-  // Filtered inbound clearance requests
+  // Helper: classify any MedicalRequest into its batch / slot / individual cohort
+  const getInboundBatchMeta = (r: any) => {
+    let meta: any = {};
+    if (r.note) {
+      try {
+        meta = typeof r.note === 'string' ? JSON.parse(r.note) : r.note;
+      } catch (_) {}
+    }
+
+    if (meta.slotRequestId || r.id?.startsWith('SR-')) {
+      const slotCode = meta.slotRequestId || r.id.split('-').slice(0, 2).join('-');
+      return {
+        batchKey: `SLOT-${slotCode}`,
+        batchCode: slotCode,
+        batchTitle: meta.slotTitle ? `${slotCode}: ${meta.slotTitle}` : `${slotCode} • ${r.test?.name || 'Pre-Booked Slot'}`,
+        batchType: 'slot' as const
+      };
+    }
+
+    if (meta.batchId && meta.batchId !== 'BATCH-2026-CLEARANCE-ROSTER') {
+      return {
+        batchKey: `BATCH-${meta.batchId}`,
+        batchCode: meta.batchId,
+        batchTitle: meta.batchName || (meta.fileName ? `Bulk Upload: ${meta.fileName}` : `Batch ${meta.batchId}`),
+        batchType: 'bulk' as const
+      };
+    }
+
+    if (r.id?.startsWith('REQ-CLR-') || meta.batchId === 'BATCH-2026-CLEARANCE-ROSTER') {
+      const protocolName = r.test?.name || meta.shortName || 'Workforce Medical Clearance';
+      return {
+        batchKey: `PROTO-${r.testId || protocolName.replace(/\s+/g, '-').toUpperCase()}`,
+        batchCode: meta.batchId || r.testId || 'CLR',
+        batchTitle: meta.batchName || `Clearance: ${protocolName}`,
+        batchType: 'bulk' as const
+      };
+    }
+
+    if (r.id?.startsWith('REQ-') || r.id?.startsWith('BULK-')) {
+      const parts = r.id.split('-');
+      const prefix = parts.slice(0, 3).join('-');
+      return {
+        batchKey: `BATCH-${prefix}`,
+        batchCode: prefix,
+        batchTitle: meta.batchName || (meta.fileName ? `Bulk Upload: ${meta.fileName}` : `Batch ${prefix}`),
+        batchType: 'bulk' as const
+      };
+    }
+
+    const dateKey = r.createdAt ? new Date(r.createdAt).toISOString().slice(0, 10) : 'RECENT';
+    return {
+      batchKey: `IND-${dateKey}`,
+      batchCode: 'INDIVIDUAL',
+      batchTitle: `Individual Clearances • ${
+        r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Recent'
+      }`,
+      batchType: 'individual' as const
+    };
+  };
+
+  interface InboundBatchGroup {
+    batchKey: string;
+    batchCode: string;
+    batchTitle: string;
+    batchType: 'slot' | 'bulk' | 'individual';
+    requests: any[];
+    waitingCount: number;
+    scheduledCount: number;
+    completedCount: number;
+    latestTs: number;
+    latestDateLabel: string;
+  }
+
+  // Distinct batches for the secondary dropdown selector
+  const allInboundBatchOptions = useMemo(() => {
+    const map = new Map<string, { batchKey: string; batchTitle: string; batchType: 'slot' | 'bulk' | 'individual'; count: number; latestTs: number }>();
+    requests.forEach((r: any) => {
+      const info = getInboundBatchMeta(r);
+      const ts = r.createdAt ? new Date(r.createdAt).getTime() : 0;
+      const existing = map.get(info.batchKey);
+      if (!existing) {
+        map.set(info.batchKey, {
+          batchKey: info.batchKey,
+          batchTitle: info.batchTitle,
+          batchType: info.batchType,
+          count: 1,
+          latestTs: ts
+        });
+      } else {
+        existing.count++;
+        if (ts > existing.latestTs) existing.latestTs = ts;
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => {
+      if (b.latestTs !== a.latestTs) return b.latestTs - a.latestTs;
+      return b.batchKey.localeCompare(a.batchKey, undefined, { numeric: true });
+    });
+  }, [requests]);
+
+  // Filtered inbound clearance requests (sorted newest first)
   const filteredInboundRequests = useMemo(() => {
-    return requests.filter((r: any) => {
+    const list = requests.filter((r: any) => {
+      // 0. Cohort Batch Filter
+      if (selectedInboundBatchFilter !== 'ALL') {
+        const info = getInboundBatchMeta(r);
+        if (info.batchKey !== selectedInboundBatchFilter) return false;
+      }
+
       // 1. Req ID Filter
       if (inboundReqIdFilter.trim()) {
         const qReq = inboundReqIdFilter.trim().toLowerCase();
@@ -1271,7 +1431,72 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
 
       return true;
     });
-  }, [requests, inboundReqIdFilter, inboundTestFilter, inboundClinicFilter, inboundStatusFilter, inboundSearchQuery]);
+
+    return [...list].sort((a: any, b: any) => {
+      const aTs = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bTs = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (bTs !== aTs) return bTs - aTs;
+      return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true });
+    });
+  }, [requests, selectedInboundBatchFilter, inboundReqIdFilter, inboundTestFilter, inboundClinicFilter, inboundStatusFilter, inboundSearchQuery]);
+
+  // Group filtered inbound requests into Batch / Slot accordions (newest batches on top)
+  const filteredInboundBatches: InboundBatchGroup[] = useMemo(() => {
+    const groups: Record<string, InboundBatchGroup> = {};
+    filteredInboundRequests.forEach((r: any) => {
+      const info = getInboundBatchMeta(r);
+      const ts = r.createdAt ? new Date(r.createdAt).getTime() : 0;
+      const dateLabel = r.createdAt
+        ? new Date(r.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+        : 'Recent';
+
+      if (!groups[info.batchKey]) {
+        groups[info.batchKey] = {
+          batchKey: info.batchKey,
+          batchCode: info.batchCode,
+          batchTitle: info.batchTitle,
+          batchType: info.batchType,
+          requests: [],
+          waitingCount: 0,
+          scheduledCount: 0,
+          completedCount: 0,
+          latestTs: ts,
+          latestDateLabel: dateLabel
+        };
+      }
+
+      const g = groups[info.batchKey];
+      g.requests.push(r);
+      if (r.status === 'COMPLETED') g.completedCount++;
+      else if (r.status === 'SCHEDULED') g.scheduledCount++;
+      else if (r.status === 'WAITING' || r.status === 'SUBMITTED') g.waitingCount++;
+
+      if (ts > g.latestTs) {
+        g.latestTs = ts;
+        g.latestDateLabel = dateLabel;
+      }
+    });
+
+    return Object.values(groups).sort((a, b) => {
+      if (b.latestTs !== a.latestTs) return b.latestTs - a.latestTs;
+      return b.batchKey.localeCompare(a.batchKey, undefined, { numeric: true });
+    });
+  }, [filteredInboundRequests]);
+
+  const toggleInboundBatchExpand = (batchKey: string, defaultExpanded = false) => {
+    setExpandedInboundBatches(prev => {
+      const current = prev[batchKey] !== undefined ? prev[batchKey] : defaultExpanded;
+      return { ...prev, [batchKey]: !current };
+    });
+  };
+
+  const setAllInboundBatchesExpanded = (expand: boolean) => {
+    const next: Record<string, boolean> = {};
+    filteredInboundBatches.forEach(b => {
+      next[b.batchKey] = expand;
+    });
+    setExpandedInboundBatches(next);
+  };
 
   // Scheduling Request being targeted in modal
   const schedulingReq = useMemo(() => {
@@ -1279,18 +1504,52 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
     return requests.find((r: any) => r.id === apptModalId) || null;
   }, [apptModalId, requests]);
 
-  // Filtered requests for Clinic Slot Scheduler
+  // Distinct batches for Clinic Scheduler filter dropdown (sorted newest first)
+  const allSchedulerBatchOptions = useMemo(() => {
+    const map = new Map<string, { batchKey: string; batchTitle: string; batchType: 'slot' | 'bulk' | 'individual'; count: number; latestTs: number }>();
+    requests.forEach((r: any) => {
+      const candVendor = r.vendorId || r.vendor?.id;
+      if (selectedVendorId && candVendor && candVendor !== selectedVendorId) return;
+      const info = getInboundBatchMeta(r);
+      const ts = r.createdAt ? new Date(r.createdAt).getTime() : 0;
+      const existing = map.get(info.batchKey);
+      if (!existing) {
+        map.set(info.batchKey, {
+          batchKey: info.batchKey,
+          batchTitle: info.batchTitle,
+          batchType: info.batchType,
+          count: 1,
+          latestTs: ts
+        });
+      } else {
+        existing.count++;
+        if (ts > existing.latestTs) existing.latestTs = ts;
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => {
+      if (b.latestTs !== a.latestTs) return b.latestTs - a.latestTs;
+      return b.batchKey.localeCompare(a.batchKey, undefined, { numeric: true });
+    });
+  }, [requests, selectedVendorId]);
+
+  // Filtered requests for Clinic Slot Scheduler (sorted newest first)
   const filteredSchedulerRequests = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
     const tomorrowStr = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
     const nowTs = Date.now();
     const sevenDaysTs = nowTs + 7 * 86400000;
 
-    return requests.filter((r: any) => {
+    const list = requests.filter((r: any) => {
       // 1. Clinic Match (only requests for this clinic vendor)
       const candVendor = r.vendorId || r.vendor?.id;
       if (selectedVendorId && candVendor && candVendor !== selectedVendorId) {
         return false;
+      }
+
+      // 1b. Batch Match
+      if (selectedSchedulerBatchFilter !== 'ALL') {
+        const info = getInboundBatchMeta(r);
+        if (info.batchKey !== selectedSchedulerBatchFilter) return false;
       }
 
       // 2. Date Filter
@@ -1316,7 +1575,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
       if (schedulerStatusFilter === 'SCHEDULED') {
         if (!r.apptDate || r.status === 'COMPLETED') return false;
       } else if (schedulerStatusFilter === 'PENDING') {
-        if (r.apptDate && r.status !== 'WAITING') return false;
+        if (r.apptDate || r.status === 'COMPLETED') return false;
       } else if (schedulerStatusFilter === 'COMPLETED') {
         if (r.status !== 'COMPLETED') return false;
       }
@@ -1337,7 +1596,14 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
 
       return true;
     });
-  }, [requests, selectedVendorId, schedulerDateFilter, schedulerCustomDate, schedulerStatusFilter, schedulerSearch]);
+
+    return [...list].sort((a: any, b: any) => {
+      const aTs = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bTs = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (bTs !== aTs) return bTs - aTs;
+      return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true });
+    });
+  }, [requests, selectedVendorId, selectedSchedulerBatchFilter, schedulerDateFilter, schedulerCustomDate, schedulerStatusFilter, schedulerSearch]);
 
   // Real-time capacity statistics for Clinic Scheduler
   const schedulerStats = useMemo(() => {
@@ -1365,7 +1631,9 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
 
     filteredSchedulerRequests.forEach((r: any) => {
       if (!r.apptDate) {
-        unscheduled.push(r);
+        if (r.status !== 'COMPLETED') {
+          unscheduled.push(r);
+        }
         return;
       }
       const note = (r.note || '').toLowerCase();
@@ -1380,6 +1648,77 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
 
     return { morning, afternoon, evening, unscheduled };
   }, [filteredSchedulerRequests]);
+
+  interface SchedulerBatchGroup {
+    batchKey: string;
+    batchCode: string;
+    batchTitle: string;
+    batchType: 'slot' | 'bulk' | 'individual';
+    requests: any[];
+    needsDateCount: number;
+    scheduledCount: number;
+    completedCount: number;
+    latestTs: number;
+    latestDateLabel: string;
+  }
+
+  // Batch-wise grouping for Clinic Appointment & Shift Scheduler (newest batches on top)
+  const filteredSchedulerBatches: SchedulerBatchGroup[] = useMemo(() => {
+    const groups: Record<string, SchedulerBatchGroup> = {};
+    filteredSchedulerRequests.forEach((r: any) => {
+      const info = getInboundBatchMeta(r);
+      const ts = r.createdAt ? new Date(r.createdAt).getTime() : 0;
+      const dateLabel = r.createdAt
+        ? new Date(r.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+        : 'Recent';
+
+      if (!groups[info.batchKey]) {
+        groups[info.batchKey] = {
+          batchKey: info.batchKey,
+          batchCode: info.batchCode,
+          batchTitle: info.batchTitle,
+          batchType: info.batchType,
+          requests: [],
+          needsDateCount: 0,
+          scheduledCount: 0,
+          completedCount: 0,
+          latestTs: ts,
+          latestDateLabel: dateLabel
+        };
+      }
+
+      const g = groups[info.batchKey];
+      g.requests.push(r);
+      if (r.status === 'COMPLETED') g.completedCount++;
+      else if (r.apptDate) g.scheduledCount++;
+      else g.needsDateCount++;
+
+      if (ts > g.latestTs) {
+        g.latestTs = ts;
+        g.latestDateLabel = dateLabel;
+      }
+    });
+
+    return Object.values(groups).sort((a, b) => {
+      if (b.latestTs !== a.latestTs) return b.latestTs - a.latestTs;
+      return b.batchKey.localeCompare(a.batchKey, undefined, { numeric: true });
+    });
+  }, [filteredSchedulerRequests]);
+
+  const toggleSchedulerBatchExpand = (batchKey: string, defaultExpanded = false) => {
+    setExpandedSchedulerBatches(prev => {
+      const current = prev[batchKey] !== undefined ? prev[batchKey] : defaultExpanded;
+      return { ...prev, [batchKey]: !current };
+    });
+  };
+
+  const setAllSchedulerBatchesExpanded = (expand: boolean) => {
+    const next: Record<string, boolean> = {};
+    filteredSchedulerBatches.forEach(b => {
+      next[b.batchKey] = expand;
+    });
+    setExpandedSchedulerBatches(next);
+  };
 
   // Helper to resolve contracted SAP material rate for candidate
   const getCandidateRate = useCallback((r: any): number => {
@@ -1476,7 +1815,12 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
       g.totalAmount = Number((g.totalSubtotal + g.totalVat).toFixed(2));
     });
 
-    return Object.values(groups).sort((a, b) => b.requests.length - a.requests.length);
+    return Object.values(groups).sort((a, b) => {
+      const aLatest = a.requests.reduce((m, r) => Math.max(m, r.createdAt ? new Date(r.createdAt).getTime() : 0), 0);
+      const bLatest = b.requests.reduce((m, r) => Math.max(m, r.createdAt ? new Date(r.createdAt).getTime() : 0), 0);
+      if (bLatest !== aLatest) return bLatest - aLatest;
+      return b.requests.length - a.requests.length;
+    });
   }, [completedRequests, getCandidateRate]);
 
   // Filtered billable batches based on req id, tests, clinics tested, batch dropdown, and candidate search
@@ -1584,6 +1928,25 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
       return true;
     });
   }, [completedRequests, invoiceReqIdFilter, invoiceTestFilter, invoiceClinicFilter, selectedInvoiceBatchFilter, invoiceSearchQuery, billableBatches]);
+
+  // Infinite scroll slices for all batch lists
+  const inboundBatchSlice = useInfiniteSlice(filteredInboundBatches, {
+    initialCount: 8,
+    step: 8,
+    resetKey: `${selectedVendorId}|${selectedInboundBatchFilter}|${inboundReqIdFilter}|${inboundTestFilter}|${inboundClinicFilter}|${inboundStatusFilter}|${inboundSearchQuery}`
+  });
+
+  const schedulerBatchSlice = useInfiniteSlice(filteredSchedulerBatches, {
+    initialCount: 8,
+    step: 8,
+    resetKey: `${selectedVendorId}|${selectedSchedulerBatchFilter}|${schedulerDateFilter}|${schedulerCustomDate}|${schedulerStatusFilter}|${schedulerSearch}`
+  });
+
+  const invoiceBatchSlice = useInfiniteSlice(filteredBillableBatches, {
+    initialCount: 8,
+    step: 8,
+    resetKey: `${selectedVendorId}|${selectedInvoiceBatchFilter}|${invoiceReqIdFilter}|${invoiceTestFilter}|${invoiceClinicFilter}|${invoiceSearchQuery}`
+  });
 
   // Live financial totals for all currently selected candidate IDs
   const invoiceSelectedSummary = useMemo(() => {
@@ -2514,31 +2877,96 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
         );
       })()}
 
-      {/* 5. INBOUND REQUESTS QUEUE TAB (REAL-TIME DATABASE ROWS) */}
+      {/* 5. INBOUND REQUESTS QUEUE TAB (BATCH-WISE & REAL-TIME DATABASE ROWS) */}
       {activeSubTab === 'inbound' && (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 border-b border-slate-100 gap-3">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between pb-3 border-b border-slate-100 gap-3">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
                   <span className="material-symbols-outlined text-[20px]">move_to_inbox</span>
                 </span>
                 <h3 className="font-display font-extrabold text-base text-slate-900">
                   Inbound Clearance Requests ({requests.length})
                 </h3>
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                  {filteredInboundBatches.length} {filteredInboundBatches.length === 1 ? 'Batch' : 'Batches'}
+                </span>
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                Live candidate clearances assigned to <span className="font-semibold text-slate-800">{currentClinic.name}</span> in PostgreSQL
+                Real-time candidate clearances assigned to{' '}
+                <span className="font-semibold text-slate-800">
+                  {inboundClinicFilter === 'ALL' ? 'All Medical Centers' : currentClinic.name}
+                </span>{' '}
+                grouped by booked slot / upload batch (newest on top)
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Live Auto-Sync Pill */}
               <button
-                onClick={() => loadClinicData(selectedVendorId)}
+                type="button"
+                onClick={() => setAutoRefreshEnabled(prev => !prev)}
+                title={autoRefreshEnabled ? 'Real-time polling active every 8s (click to pause)' : 'Auto-sync paused (click to resume)'}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer border ${
+                  autoRefreshEnabled
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                    : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                }`}
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    autoRefreshEnabled
+                      ? isSyncingLive
+                        ? 'bg-emerald-500 animate-ping'
+                        : 'bg-emerald-500 animate-pulse'
+                      : 'bg-slate-400'
+                  }`}
+                />
+                <span>
+                  {autoRefreshEnabled
+                    ? isSyncingLive
+                      ? 'Syncing...'
+                      : `Live Sync${lastSyncedAt ? ` • ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}`
+                    : 'Live Sync Paused'}
+                </span>
+              </button>
+
+              {/* Grouping Mode Toggle: Batch Wise vs Flat List */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setInboundGroupingMode('batch')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                    inboundGroupingMode === 'batch'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[15px]">inventory_2</span>
+                  <span>Batch Wise</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInboundGroupingMode('flat')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                    inboundGroupingMode === 'flat'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[15px]">table_rows</span>
+                  <span>Flat List</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => loadClinicData(inboundClinicFilter === 'ALL' ? 'ALL' : selectedVendorId)}
                 className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer border border-slate-200"
               >
                 <span className="material-symbols-outlined text-[16px]">refresh</span>
-                <span>Refresh Live</span>
+                <span>Refresh Now</span>
               </button>
             </div>
           </div>
@@ -2680,10 +3108,11 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                     )}
                   </div>
 
-                  {(inboundReqIdFilter || inboundTestFilter !== 'ALL' || inboundClinicFilter !== 'ALL' || inboundStatusFilter !== 'ALL' || inboundSearchQuery) && (
+                  {(inboundReqIdFilter || inboundTestFilter !== 'ALL' || inboundClinicFilter !== 'ALL' || inboundStatusFilter !== 'ALL' || inboundSearchQuery || selectedInboundBatchFilter !== 'ALL') && (
                     <button
                       type="button"
                       onClick={() => {
+                        setSelectedInboundBatchFilter('ALL');
                         setInboundReqIdFilter('');
                         setInboundTestFilter('ALL');
                         setInboundClinicFilter('ALL');
@@ -2699,87 +3128,254 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 </div>
               </div>
             </div>
+
+            {/* Cohort / Slot Batch Dropdown Filter */}
+            {allInboundBatchOptions.length > 1 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-slate-200/60 text-xs">
+                <div className="flex items-center gap-2 flex-1 min-w-[260px]">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0">
+                    Cohort / Slot Batch:
+                  </span>
+                  <select
+                    value={selectedInboundBatchFilter}
+                    onChange={(e) => setSelectedInboundBatchFilter(e.target.value)}
+                    className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 focus:outline-none focus:border-primary cursor-pointer truncate max-w-md shadow-2xs"
+                  >
+                    <option value="ALL">All Batches &amp; Cohorts ({allInboundBatchOptions.length})</option>
+                    {allInboundBatchOptions.map(b => (
+                      <option key={b.batchKey} value={b.batchKey}>
+                        {b.batchType === 'slot' ? 'Slot: ' : b.batchType === 'bulk' ? 'Batch: ' : 'Individual: '}
+                        {b.batchTitle} ({b.count} {b.count === 1 ? 'request' : 'requests'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {inboundGroupingMode === 'batch' && filteredInboundBatches.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setAllInboundBatchesExpanded(true)}
+                      className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-[11px] font-bold text-slate-600 cursor-pointer transition-colors"
+                    >
+                      Expand All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAllInboundBatchesExpanded(false)}
+                      className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-[11px] font-bold text-slate-600 cursor-pointer transition-colors"
+                    >
+                      Collapse All
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-100/80 text-slate-600 uppercase font-bold text-[10.5px]">
-                <tr>
-                  <th className="py-3 px-3">Request ID</th>
-                  <th className="py-3 px-3">Employee</th>
-                  <th className="py-3 px-3">Iqama / National ID</th>
-                  <th className="py-3 px-3">Clinic Tested</th>
-                  <th className="py-3 px-3">Department</th>
-                  <th className="py-3 px-3">Medical Screening</th>
-                  <th className="py-3 px-3">Status</th>
-                  <th className="py-3 px-3">Appointment Date</th>
-                  <th className="py-3 px-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium">
-                {filteredInboundRequests.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="py-8 text-center text-slate-400">
-                      No inbound requests match the selected filter criteria.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredInboundRequests.map((r) => (
-                    <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3 px-3 font-mono font-bold text-slate-900">{r.id}</td>
-                      <td className="py-3 px-3">
-                        <div className="font-bold text-slate-800">{r.employee?.name || 'Worker'}</div>
-                        <div className="text-[11px] font-mono text-slate-400">{r.employee?.employeeNo}</div>
-                      </td>
-                      <td className="py-3 px-3 font-mono text-slate-600">{r.employee?.iqamaId || '-'}</td>
-                      <td className="py-3 px-3">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                          <span className="material-symbols-outlined text-[12px] text-slate-400">local_hospital</span>
-                          {r.vendor?.code || r.vendorId || currentClinic.code}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-slate-600">{r.department || r.employee?.department || 'Operations'}</td>
-                      <td className="py-3 px-3 text-slate-800 font-semibold">{r.test?.name || 'General Medical'}</td>
-                      <td className="py-3 px-3">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          r.status === 'COMPLETED'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : r.status === 'SCHEDULED'
-                            ? 'bg-sky-100 text-sky-800'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {r.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-slate-600">
-                        {r.apptDate ? new Date(r.apptDate).toLocaleDateString() : 'Pending Schedule'}
-                      </td>
-                      <td className="py-3 px-3 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => {
-                              setActiveCandidateId(r.id);
-                              setActiveSubTab('entry');
-                            }}
-                            className="px-2.5 py-1 rounded-lg bg-primary text-white text-xs font-semibold hover:bg-slate-900 transition-colors cursor-pointer"
-                          >
-                            Examine / Lab
-                          </button>
-                          <button
-                            onClick={() => openScheduleModal(r)}
-                            className="p-1 rounded-lg hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
-                            title="Schedule Appointment"
-                          >
-                            <span className="material-symbols-outlined text-[17px]">calendar_add_on</span>
-                          </button>
-                        </div>
-                      </td>
+          {(() => {
+            const renderInboundTable = (rows: any[]) => (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100/80 text-slate-600 uppercase font-bold text-[10.5px]">
+                    <tr>
+                      <th className="py-3 px-3">Request ID</th>
+                      <th className="py-3 px-3">Employee</th>
+                      <th className="py-3 px-3">Iqama / National ID</th>
+                      <th className="py-3 px-3">Clinic Tested</th>
+                      <th className="py-3 px-3">Department</th>
+                      <th className="py-3 px-3">Medical Screening</th>
+                      <th className="py-3 px-3">Status</th>
+                      <th className="py-3 px-3">Appointment Date</th>
+                      <th className="py-3 px-3 text-right">Actions</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium">
+                    {rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="py-8 text-center text-slate-400">
+                          No inbound requests match the selected filter criteria.
+                        </td>
+                      </tr>
+                    ) : (
+                      rows.map((r) => (
+                        <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-3 px-3 font-mono font-bold text-slate-900">{r.id}</td>
+                          <td className="py-3 px-3">
+                            <div className="font-bold text-slate-800">{r.employee?.name || 'Worker'}</div>
+                            <div className="text-[11px] font-mono text-slate-400">{r.employee?.employeeNo}</div>
+                          </td>
+                          <td className="py-3 px-3 font-mono text-slate-600">{r.employee?.iqamaId || '-'}</td>
+                          <td className="py-3 px-3">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                              <span className="material-symbols-outlined text-[12px] text-slate-400">local_hospital</span>
+                              {r.vendor?.code || r.vendorId || currentClinic.code}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-slate-600">{r.department || r.employee?.department || 'Operations'}</td>
+                          <td className="py-3 px-3 text-slate-800 font-semibold">{r.test?.name || 'General Medical'}</td>
+                          <td className="py-3 px-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              r.status === 'COMPLETED'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : r.status === 'SCHEDULED'
+                                ? 'bg-sky-100 text-sky-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {r.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-slate-600">
+                            {r.apptDate ? new Date(r.apptDate).toLocaleDateString() : 'Pending Schedule'}
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => {
+                                  setActiveCandidateId(r.id);
+                                  setActiveSubTab('entry');
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-primary text-white text-xs font-semibold hover:bg-slate-900 transition-colors cursor-pointer"
+                              >
+                                Examine / Lab
+                              </button>
+                              <button
+                                onClick={() => openScheduleModal(r)}
+                                className="p-1 rounded-lg hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
+                                title="Schedule Appointment"
+                              >
+                                <span className="material-symbols-outlined text-[17px]">calendar_add_on</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            );
+
+            if (inboundGroupingMode === 'flat') {
+              return renderInboundTable(filteredInboundRequests);
+            }
+
+            if (filteredInboundBatches.length === 0) {
+              return (
+                <div className="py-10 text-center text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-xs">
+                  No inbound batches or requests match the selected filter criteria.
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-3">
+                {inboundBatchSlice.visibleItems.map((batch, idx) => {
+                  const defaultExpanded = idx === 0;
+                  const isExpanded =
+                    expandedInboundBatches[batch.batchKey] !== undefined
+                      ? expandedInboundBatches[batch.batchKey]
+                      : defaultExpanded;
+
+                  return (
+                    <div
+                      key={batch.batchKey}
+                      className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-2xs transition-all"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleInboundBatchExpand(batch.batchKey, defaultExpanded)}
+                        className="w-full px-4 py-3 bg-slate-50/80 hover:bg-slate-100/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-left transition-colors cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span
+                            className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 ${
+                              batch.batchType === 'slot'
+                                ? 'bg-indigo-100 text-indigo-700'
+                                : batch.batchType === 'bulk'
+                                ? 'bg-sky-100 text-sky-700'
+                                : 'bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            <span className="material-symbols-outlined text-[19px]">
+                              {batch.batchType === 'slot'
+                                ? 'event_available'
+                                : batch.batchType === 'bulk'
+                                ? 'inventory_2'
+                                : 'person'}
+                            </span>
+                          </span>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span
+                                className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
+                                  batch.batchType === 'slot'
+                                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                    : batch.batchType === 'bulk'
+                                    ? 'bg-sky-50 text-sky-700 border-sky-200'
+                                    : 'bg-slate-100 text-slate-700 border-slate-200'
+                                }`}
+                              >
+                                {batch.batchType === 'slot'
+                                  ? `Slot: ${batch.batchCode}`
+                                  : batch.batchType === 'bulk'
+                                  ? `Batch: ${batch.batchCode}`
+                                  : 'Individual'}
+                              </span>
+                              <span className="text-[11px] text-slate-400 font-medium">
+                                Requested {batch.latestDateLabel}
+                              </span>
+                            </div>
+                            <h4 className="font-display font-extrabold text-sm text-slate-900 truncate mt-0.5">
+                              {batch.batchTitle}
+                            </h4>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap shrink-0">
+                          {batch.waitingCount > 0 && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                              {batch.waitingCount} Waiting
+                            </span>
+                          )}
+                          {batch.scheduledCount > 0 && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800">
+                              {batch.scheduledCount} Scheduled
+                            </span>
+                          )}
+                          {batch.completedCount > 0 && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                              {batch.completedCount} Completed
+                            </span>
+                          )}
+                          <span className="px-2.5 py-0.5 rounded-full text-[10.5px] font-mono font-bold bg-slate-200/80 text-slate-800">
+                            {batch.requests.length} {batch.requests.length === 1 ? 'Req' : 'Reqs'}
+                          </span>
+                          <span className="material-symbols-outlined text-slate-500 text-[20px]">
+                            {isExpanded ? 'expand_less' : 'expand_more'}
+                          </span>
+                        </div>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="p-3 border-t border-slate-100 bg-white">
+                          {renderInboundTable(batch.requests)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <InfiniteScrollSentinel
+                  hasMore={inboundBatchSlice.hasMore}
+                  onLoadMore={inboundBatchSlice.loadMore}
+                  visibleCount={inboundBatchSlice.visibleCount}
+                  totalCount={inboundBatchSlice.totalCount}
+                  itemLabel="batches"
+                />
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2807,6 +3403,34 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
                 <span>Active Operating Hours: 08:00 AM – 20:00 PM</span>
               </span>
+              {/* Live Auto-Sync Pill */}
+              <button
+                type="button"
+                onClick={() => setAutoRefreshEnabled(prev => !prev)}
+                title={autoRefreshEnabled ? 'Real-time polling active every 8s (click to pause)' : 'Auto-sync paused (click to resume)'}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer border ${
+                  autoRefreshEnabled
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                    : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                }`}
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    autoRefreshEnabled
+                      ? isSyncingLive
+                        ? 'bg-emerald-500 animate-ping'
+                        : 'bg-emerald-500 animate-pulse'
+                      : 'bg-slate-400'
+                  }`}
+                />
+                <span>
+                  {autoRefreshEnabled
+                    ? isSyncingLive
+                      ? 'Syncing...'
+                      : `Live Sync${lastSyncedAt ? ` • ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}`
+                    : 'Live Sync Paused'}
+                </span>
+              </button>
               <button
                 type="button"
                 onClick={() => loadClinicData(selectedVendorId)}
@@ -2814,7 +3438,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 title="Refresh Appointments"
               >
                 <span className="material-symbols-outlined text-[16px]">sync</span>
-                <span>Refresh Live</span>
+                <span>Refresh Now</span>
               </button>
             </div>
           </div>
@@ -2943,8 +3567,20 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 </div>
               </div>
 
-              {/* View Switcher: Shifts vs List */}
-              <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shrink-0 self-start lg:self-auto">
+              {/* View Switcher: Batch Wise vs Shifts vs List */}
+              <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shrink-0 self-start lg:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setSchedulerViewMode('batch')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                    schedulerViewMode === 'batch'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[15px]">inventory_2</span>
+                  <span>Batch Wise</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setSchedulerViewMode('shifts')}
@@ -2972,9 +3608,9 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
               </div>
             </div>
 
-            {/* Sub-Filters: Search & Status Dropdown */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 border-t border-slate-200/70">
-              <div className="sm:col-span-2 relative">
+            {/* Sub-Filters: Search, Cohort Batch & Status Dropdown */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 pt-1 border-t border-slate-200/70">
+              <div className="sm:col-span-5 relative">
                 <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                   <span className="material-symbols-outlined text-[17px]">search</span>
                 </span>
@@ -2983,7 +3619,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                   value={schedulerSearch}
                   onChange={(e) => setSchedulerSearch(e.target.value)}
                   placeholder="Filter by Candidate Name, Iqama, Req ID, Protocol, Department..."
-                  className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-primary shadow-2xs"
+                  className="w-full pl-9 pr-7 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-primary shadow-2xs"
                 />
                 {schedulerSearch && (
                   <button
@@ -2996,25 +3632,42 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="sm:col-span-4">
+                <select
+                  value={selectedSchedulerBatchFilter}
+                  onChange={(e) => setSelectedSchedulerBatchFilter(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-800 shadow-2xs focus:outline-none focus:border-primary cursor-pointer truncate"
+                >
+                  <option value="ALL">All Batches &amp; Cohorts ({allSchedulerBatchOptions.length})</option>
+                  {allSchedulerBatchOptions.map(b => (
+                    <option key={b.batchKey} value={b.batchKey}>
+                      {b.batchType === 'slot' ? 'Slot: ' : b.batchType === 'bulk' ? 'Batch: ' : 'Individual: '}
+                      {b.batchTitle} ({b.count})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="sm:col-span-3 flex items-center gap-2">
                 <select
                   value={schedulerStatusFilter}
                   onChange={(e) => setSchedulerStatusFilter(e.target.value as any)}
                   className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-2xs focus:outline-none focus:border-primary cursor-pointer"
                 >
-                  <option value="ALL">All Statuses ({requests.length})</option>
+                  <option value="ALL">All Statuses ({schedulerStats.total})</option>
                   <option value="SCHEDULED">Scheduled Only ({schedulerStats.scheduled})</option>
                   <option value="PENDING">Awaiting Date ({schedulerStats.pendingDate})</option>
                   <option value="COMPLETED">Completed ({schedulerStats.completed})</option>
                 </select>
 
-                {(schedulerDateFilter !== 'ALL' || schedulerStatusFilter !== 'ALL' || schedulerSearch) && (
+                {(schedulerDateFilter !== 'ALL' || schedulerStatusFilter !== 'ALL' || schedulerSearch || selectedSchedulerBatchFilter !== 'ALL') && (
                   <button
                     type="button"
                     onClick={() => {
                       setSchedulerDateFilter('ALL');
                       setSchedulerStatusFilter('ALL');
                       setSchedulerSearch('');
+                      setSelectedSchedulerBatchFilter('ALL');
                     }}
                     className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 text-xs font-bold cursor-pointer shrink-0 transition-colors"
                     title="Reset all filters"
@@ -3024,6 +3677,30 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 )}
               </div>
             </div>
+
+            {schedulerViewMode === 'batch' && filteredSchedulerBatches.length > 0 && (
+              <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-xs">
+                <span className="text-[11px] font-mono font-bold text-slate-500">
+                  Showing {filteredSchedulerBatches.length} {filteredSchedulerBatches.length === 1 ? 'Batch' : 'Batches'} ({filteredSchedulerRequests.length} candidates)
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setAllSchedulerBatchesExpanded(true)}
+                    className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-[11px] font-bold text-slate-600 cursor-pointer transition-colors"
+                  >
+                    Expand All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAllSchedulerBatchesExpanded(false)}
+                    className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-[11px] font-bold text-slate-600 cursor-pointer transition-colors"
+                  >
+                    Collapse All
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Action Required: Unscheduled Candidates Notice Banner */}
@@ -3324,97 +4001,219 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
             </div>
           )}
 
-          {/* VIEW MODE 2: FULL TABLE / LIST VIEW */}
-          {schedulerViewMode === 'list' && (
-            <div className="overflow-x-auto rounded-xl border border-slate-200">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200">
-                  <tr>
-                    <th className="py-3 px-3">Request ID</th>
-                    <th className="py-3 px-3">Candidate</th>
-                    <th className="py-3 px-3">Iqama / Badge</th>
-                    <th className="py-3 px-3">Clinic Facility</th>
-                    <th className="py-3 px-3">Screening Protocol</th>
-                    <th className="py-3 px-3">Appointment Date</th>
-                    <th className="py-3 px-3">Status</th>
-                    <th className="py-3 px-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredSchedulerRequests.length === 0 ? (
+          {/* VIEW MODE 0 & 2: SHARED SCHEDULER TABLE (BATCH WISE ACCORDIONS OR FLAT LIST VIEW) */}
+          {schedulerViewMode !== 'shifts' && (() => {
+            const renderSchedulerTable = (rows: any[]) => (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200">
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-slate-400">
-                        No candidate appointments match your filter criteria.
-                      </td>
+                      <th className="py-3 px-3">Request ID</th>
+                      <th className="py-3 px-3">Candidate</th>
+                      <th className="py-3 px-3">Iqama / Badge</th>
+                      <th className="py-3 px-3">Clinic Facility</th>
+                      <th className="py-3 px-3">Screening Protocol</th>
+                      <th className="py-3 px-3">Appointment Date</th>
+                      <th className="py-3 px-3">Status</th>
+                      <th className="py-3 px-3 text-right">Actions</th>
                     </tr>
-                  ) : (
-                    filteredSchedulerRequests.map((r) => (
-                      <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-3 px-3 font-mono font-bold text-slate-900">{r.id}</td>
-                        <td className="py-3 px-3 font-bold text-slate-800">{r.employee?.name || 'Worker'}</td>
-                        <td className="py-3 px-3 font-mono text-slate-600">
-                          <div>{r.employee?.iqamaId || '—'}</div>
-                          <div className="text-[10px] text-slate-400 font-mono">{r.employee?.employeeNo}</div>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                            {r.vendor?.code || r.vendorId || currentClinic.code}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-slate-700 font-medium">{r.test?.name || 'General Medical'}</td>
-                        <td className="py-3 px-3">
-                          {r.apptDate ? (
-                            <span className="font-semibold text-slate-800">
-                              {new Date(r.apptDate).toLocaleDateString()}
-                              {r.note && (
-                                <span className="block text-[10px] text-slate-500 font-normal truncate max-w-[150px]">
-                                  {r.note}
-                                </span>
-                              )}
-                            </span>
-                          ) : (
-                            <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-[10px] font-bold">
-                              Pending Date
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            r.status === 'COMPLETED'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : r.status === 'SCHEDULED'
-                              ? 'bg-sky-100 text-sky-800'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            {r.status}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => openScheduleModal(r)}
-                              className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all cursor-pointer"
-                              title="Book or reschedule appointment"
-                            >
-                              {r.apptDate ? 'Reschedule' : 'Book Slot'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDirectExamine(r)}
-                              className="px-2.5 py-1 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all cursor-pointer shadow-2xs"
-                            >
-                              Examine
-                            </button>
-                          </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="py-8 text-center text-slate-400">
+                          No candidate appointments match your filter criteria.
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
+                    ) : (
+                      rows.map((r) => (
+                        <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-3 px-3 font-mono font-bold text-slate-900">{r.id}</td>
+                          <td className="py-3 px-3 font-bold text-slate-800">{r.employee?.name || 'Worker'}</td>
+                          <td className="py-3 px-3 font-mono text-slate-600">
+                            <div>{r.employee?.iqamaId || '—'}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">{r.employee?.employeeNo}</div>
+                          </td>
+                          <td className="py-3 px-3">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                              {r.vendor?.code || r.vendorId || currentClinic.code}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-slate-700 font-medium">{r.test?.name || 'General Medical'}</td>
+                          <td className="py-3 px-3">
+                            {r.apptDate ? (
+                              <span className="font-semibold text-slate-800">
+                                {new Date(r.apptDate).toLocaleDateString()}
+                                {r.note && (
+                                  <span className="block text-[10px] text-slate-500 font-normal truncate max-w-[150px]">
+                                    {r.note}
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-[10px] font-bold">
+                                Pending Date
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              r.status === 'COMPLETED'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : r.status === 'SCHEDULED'
+                                ? 'bg-sky-100 text-sky-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {r.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => openScheduleModal(r)}
+                                className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+                                title="Book or reschedule appointment"
+                              >
+                                {r.apptDate ? 'Reschedule' : 'Book Slot'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDirectExamine(r)}
+                                className="px-2.5 py-1 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                              >
+                                Examine
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            );
+
+            if (schedulerViewMode === 'list') {
+              return renderSchedulerTable(filteredSchedulerRequests);
+            }
+
+            if (filteredSchedulerBatches.length === 0) {
+              return (
+                <div className="py-10 text-center text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-xs">
+                  No appointment batches match your filter criteria.
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-3">
+                {schedulerBatchSlice.visibleItems.map((batch, idx) => {
+                  const defaultExpanded = idx === 0;
+                  const isExpanded =
+                    expandedSchedulerBatches[batch.batchKey] !== undefined
+                      ? expandedSchedulerBatches[batch.batchKey]
+                      : defaultExpanded;
+
+                  return (
+                    <div
+                      key={batch.batchKey}
+                      className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-2xs transition-all"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleSchedulerBatchExpand(batch.batchKey, defaultExpanded)}
+                        className="w-full px-4 py-3 bg-slate-50/80 hover:bg-slate-100/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-left transition-colors cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span
+                            className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 ${
+                              batch.batchType === 'slot'
+                                ? 'bg-indigo-100 text-indigo-700'
+                                : batch.batchType === 'bulk'
+                                ? 'bg-sky-100 text-sky-700'
+                                : 'bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            <span className="material-symbols-outlined text-[19px]">
+                              {batch.batchType === 'slot'
+                                ? 'event_available'
+                                : batch.batchType === 'bulk'
+                                ? 'inventory_2'
+                                : 'person'}
+                            </span>
+                          </span>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span
+                                className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
+                                  batch.batchType === 'slot'
+                                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                    : batch.batchType === 'bulk'
+                                    ? 'bg-sky-50 text-sky-700 border-sky-200'
+                                    : 'bg-slate-100 text-slate-700 border-slate-200'
+                                }`}
+                              >
+                                {batch.batchType === 'slot'
+                                  ? `Slot: ${batch.batchCode}`
+                                  : batch.batchType === 'bulk'
+                                  ? `Batch: ${batch.batchCode}`
+                                  : 'Individual'}
+                              </span>
+                              <span className="text-[11px] text-slate-400 font-medium">
+                                Requested {batch.latestDateLabel}
+                              </span>
+                            </div>
+                            <h4 className="font-display font-extrabold text-sm text-slate-900 truncate mt-0.5">
+                              {batch.batchTitle}
+                            </h4>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap shrink-0">
+                          {batch.needsDateCount > 0 && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                              {batch.needsDateCount} Needs Date
+                            </span>
+                          )}
+                          {batch.scheduledCount > 0 && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800">
+                              {batch.scheduledCount} Scheduled
+                            </span>
+                          )}
+                          {batch.completedCount > 0 && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                              {batch.completedCount} Completed
+                            </span>
+                          )}
+                          <span className="px-2.5 py-0.5 rounded-full text-[10.5px] font-mono font-bold bg-slate-200/80 text-slate-800">
+                            {batch.requests.length} {batch.requests.length === 1 ? 'Req' : 'Reqs'}
+                          </span>
+                          <span className="material-symbols-outlined text-slate-500 text-[20px]">
+                            {isExpanded ? 'expand_less' : 'expand_more'}
+                          </span>
+                        </div>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="p-3 border-t border-slate-100 bg-white">
+                          {renderSchedulerTable(batch.requests)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <InfiniteScrollSentinel
+                  hasMore={schedulerBatchSlice.hasMore}
+                  onLoadMore={schedulerBatchSlice.loadMore}
+                  visibleCount={schedulerBatchSlice.visibleCount}
+                  totalCount={schedulerBatchSlice.totalCount}
+                  itemLabel="batches"
+                />
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -3759,7 +4558,8 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                   <p className="text-xs font-semibold text-slate-600">No completed examinations match the search criteria.</p>
                 </div>
               ) : (
-                filteredBillableBatches.map((batch) => {
+                <>
+                  {invoiceBatchSlice.visibleItems.map((batch) => {
                   const isExpanded = expandedInvoiceBatches[batch.batchKey] !== false;
                   const batchIds = batch.requests.map(r => r.id);
                   const selectedInBatch = batch.requests.filter(r => billableRequests.includes(r.id)).length;
@@ -3964,7 +4764,15 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                       )}
                     </div>
                   );
-                })
+                  })}
+                  <InfiniteScrollSentinel
+                    hasMore={invoiceBatchSlice.hasMore}
+                    onLoadMore={invoiceBatchSlice.loadMore}
+                    visibleCount={invoiceBatchSlice.visibleCount}
+                    totalCount={invoiceBatchSlice.totalCount}
+                    itemLabel="batches"
+                  />
+                </>
               )}
             </div>
           )}
@@ -4063,9 +4871,9 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
             </div>
           )}
 
-          {/* STICKY / BOTTOM FINANCIAL SUMMARY & INVOICE SUBMIT BAR */}
+          {/* STICKY IN WINDOW: FINANCIAL SUMMARY & INVOICE SUBMIT BAR */}
           {completedRequests.length > 0 && (
-            <div className="mt-4 p-4 rounded-2xl bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-md">
+            <div className="sticky bottom-4 z-30 mt-4 p-4 rounded-2xl bg-slate-900/95 backdrop-blur-md text-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-xl ring-1 ring-white/10">
               <div className="flex items-center gap-4 flex-wrap">
                 <div>
                   <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">

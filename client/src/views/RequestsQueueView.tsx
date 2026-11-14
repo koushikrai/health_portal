@@ -1,7 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { CertificateModal } from '../components/certificate/CertificateModal';
 import { PdfReportViewerModal } from '../components/certificate/PdfReportViewerModal';
+import { SlotWorkforcePanel } from '../components/slots/SlotAssignmentModal';
+import { useInfiniteSlice, InfiniteScrollSentinel } from '../components/common/InfiniteScrollSentinel';
 
 interface RequestsQueueViewProps {
   userRole?: string;
@@ -90,16 +93,45 @@ const Sparkline: React.FC<SparklineProps> = ({
 );
 
 export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole = 'HR' }) => {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Top-level Request Mode Toggle: 'standard' (Normally Requested) vs 'slots' (Booked Slots & Workforce Assignment)
+  const [requestMode, setRequestMode] = useState<'standard' | 'slots'>(() =>
+    searchParams.get('mode') === 'slots' || searchParams.get('tab') === 'slots' ? 'slots' : 'standard'
+  );
+  const [slotQueue, setSlotQueue] = useState<any[]>([]);
+  const [selectedSlotId, setSelectedSlotId] = useState<string>(() => searchParams.get('slotId') || '');
+  const [slotSearch, setSlotSearch] = useState<string>('');
+  const [slotStatusFilter, setSlotStatusFilter] = useState<'ALL' | 'PENDING' | 'FULL'>('ALL');
+
+  useEffect(() => {
+    const modeParam = searchParams.get('mode') || searchParams.get('tab');
+    const slotParam = searchParams.get('slotId');
+    if (modeParam === 'slots') setRequestMode('slots');
+    else if (modeParam === 'standard') setRequestMode('standard');
+    if (slotParam) setSelectedSlotId(slotParam);
+  }, [searchParams]);
+
+  const handleSwitchRequestMode = (mode: 'standard' | 'slots') => {
+    setRequestMode(mode);
+    const nextParams: Record<string, string> = { mode };
+    if (mode === 'slots' && (selectedSlotId || slotQueue[0]?.id)) {
+      nextParams.slotId = selectedSlotId || slotQueue[0].id;
+    }
+    setSearchParams(nextParams, { replace: true });
+  };
+
   // Navigation & Filter State
   const [selectedPlant, setSelectedPlant] = useState<'ALL' | 'YANPET' | 'SABIC' | 'SADARA'>('ALL');
-  const [selectedBatchId, setSelectedBatchId] = useState<string>('REQ-2026-0104');
+  const [selectedBatchId, setSelectedBatchId] = useState<string>('');
   const [batchSearch, setBatchSearch] = useState<string>('');
 
   // Table Filter & Sorting State
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'UNASSIGNED' | 'ASSIGNED' | 'EXPIRING' | 'WAITING' | 'SUBMITTED' | 'CANCELLED'>('ALL');
   const [clinicFilter, setClinicFilter] = useState<string>('ALL');
   const [employeeSearch, setEmployeeSearch] = useState<string>('');
-  type SortField = 'UNASSIGNED_FIRST' | 'EXPIRING_FIRST' | 'CLINIC' | 'DEPARTMENT' | 'EMP_NO' | 'NAME';
+  type SortField = 'UNASSIGNED_FIRST' | 'RECENT_FIRST' | 'EXPIRING_FIRST' | 'CLINIC' | 'DEPARTMENT' | 'EMP_NO' | 'NAME';
   const [sortField, setSortField] = useState<SortField>('UNASSIGNED_FIRST');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
@@ -137,27 +169,52 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
   const [newBatchEmpNo, setNewBatchEmpNo] = useState('11000018');
   const [newBatchEmpName, setNewBatchEmpName] = useState('Lead Turnaround Technician');
 
-  // Load database data
+  // Load database data & keep queue synchronized in real time
   useEffect(() => {
     loadData();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadData(true);
+      }
+    }, 10000);
+    const onFocusOrVis = () => {
+      if (document.visibilityState === 'visible') {
+        loadData(true);
+      }
+    };
+    window.addEventListener('focus', onFocusOrVis);
+    document.addEventListener('visibilitychange', onFocusOrVis);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocusOrVis);
+      document.removeEventListener('visibilitychange', onFocusOrVis);
+    };
   }, []);
 
-  const loadData = async () => {
+  const loadData = async (silent = false) => {
     try {
-      setLoading(true);
-      const [reqRes, clinicRes] = await Promise.all([
+      if (!silent) setLoading(true);
+      const [reqRes, clinicRes, slotRes] = await Promise.all([
         api.getRequests(),
-        api.getClinics()
+        api.getClinics(),
+        api.getSlotQueue().catch(() => ({ data: { requests: [] } }))
       ]);
       setRequests(reqRes.data?.requests || []);
+      const fetchedSlots = slotRes.data?.requests || [];
+      setSlotQueue(fetchedSlots);
+      if (!selectedSlotId && fetchedSlots.length > 0) {
+        setSelectedSlotId(fetchedSlots[0].id);
+      }
       if (clinicRes.data?.clinics && clinicRes.data.clinics.length > 0) {
         setClinics(clinicRes.data.clinics);
-        setSelectedClinicId(clinicRes.data.clinics[0].id);
+        if (!silent) {
+          setSelectedClinicId(prev => prev || clinicRes.data.clinics[0].id);
+        }
       }
     } catch (e) {
       console.error('Failed to load queue data:', e);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -214,23 +271,31 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
       }
     ];
 
-    // Dynamically include any custom bulk upload batches
+    // Helper: identify requests originating from Slot Bookings (handled in the dedicated Booked Slots toggle)
+    const isSlotBasedRequest = (r: any) => {
+      if (r.id?.startsWith('SR-')) return true;
+      if (r.note) {
+        try {
+          const meta = typeof r.note === 'string' ? JSON.parse(r.note) : r.note;
+          if (meta?.slotRequestId) return true;
+        } catch (_) {}
+      }
+      return false;
+    };
+
+    const standardRequests = requests.filter(r => !isSlotBasedRequest(r));
+
+    // Dynamically include any custom bulk upload batches (excluding SR- slot requests)
     const dynamicConfigs: any[] = [];
     const knownIds = new Set(batchConfigs.map(c => c.id));
-    requests.forEach(r => {
+    standardRequests.forEach(r => {
       let bId = '';
       let meta: any = null;
       if (r.note) {
         try { meta = typeof r.note === 'string' ? JSON.parse(r.note) : r.note; } catch (_) {}
       }
-      if (meta?.slotRequestId && !knownIds.has(meta.slotRequestId)) {
-        bId = meta.slotRequestId;
-      } else if (meta?.batchId && !knownIds.has(meta.batchId)) {
+      if (meta?.batchId && !knownIds.has(meta.batchId)) {
         bId = meta.batchId;
-      } else if (r.id.startsWith('SR-')) {
-        const parts = r.id.split('-');
-        const autoId = parts.slice(0, 2).join('-');
-        if (!knownIds.has(autoId)) bId = autoId;
       } else if (r.id.startsWith('BULK-')) {
         const parts = r.id.split('-');
         const autoId = parts.slice(0, 3).join('-');
@@ -238,8 +303,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
       }
       if (bId && !knownIds.has(bId)) {
         knownIds.add(bId);
-        const isSlotBatch = bId.startsWith('SR-') || Boolean(meta?.slotRequestId);
-        const plantStr = meta?.plant || r.department || (isSlotBatch ? 'Sadara Complex (Jubail)' : 'ECC Main Facility');
+        const plantStr = meta?.plant || r.department || 'ECC Main Facility';
         let plantCategory: 'YANPET' | 'SABIC' | 'SADARA' | 'OTHER' = 'OTHER';
         if (/yanpet/i.test(plantStr)) plantCategory = 'YANPET';
         else if (/sabic/i.test(plantStr)) plantCategory = 'SABIC';
@@ -247,18 +311,41 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
 
         dynamicConfigs.push({
           id: bId,
-          title: meta?.slotTitle || meta?.batchName || (isSlotBatch ? `Pre-Booked Slot Batch ${bId}` : `Bulk Batch ${bId}`),
+          title: meta?.batchName || `Bulk Batch ${bId}`,
           plant: plantStr,
           plantCategory,
           requestedDate: r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Today',
-          protocolType: meta?.slotTitle || (meta?.fileName ? `Upload: ${meta.fileName}` : (isSlotBatch ? (r.test?.name || 'Pre-Booked Quota Clearance') : 'Bulk Roster Intake')),
-          subStatus: isSlotBatch ? 'Pre-Booked Quota' : 'Batch Intake',
+          protocolType: meta?.fileName ? `Upload: ${meta.fileName}` : 'Bulk Roster Intake',
+          subStatus: 'Batch Intake',
           isOverdue: false
         });
       }
     });
 
     const allConfigs = [...batchConfigs, ...dynamicConfigs];
+
+    // Check if there are any unbatched normal individual requests (e.g. from New Request intake)
+    const matchedIds = new Set<string>();
+    allConfigs.forEach(cfg => {
+      standardRequests.forEach(r => {
+        if (r.id.startsWith(cfg.id) || (r.note && typeof r.note === 'string' && r.note.includes(cfg.id))) {
+          matchedIds.add(r.id);
+        }
+      });
+    });
+    const unbatchedSingles = standardRequests.filter(r => !matchedIds.has(r.id));
+    if (unbatchedSingles.length > 0) {
+      allConfigs.push({
+        id: 'REQ-INDIVIDUAL',
+        title: 'Individual Clearance Requests',
+        plant: 'All Facilities',
+        plantCategory: 'OTHER' as const,
+        requestedDate: 'Ongoing',
+        protocolType: 'Standard Intake',
+        subStatus: `${unbatchedSingles.length} Requests`,
+        isOverdue: false
+      });
+    }
 
     const mapEmployees = (reqList: any[], defaultBatchId: string): BatchEmployee[] => {
       return reqList.map((r, idx) => {
@@ -305,8 +392,17 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
       });
     };
 
-    return allConfigs.map(cfg => {
-      const bReqs = requests.filter(r => r.id.startsWith(cfg.id) || (r.note && typeof r.note === 'string' && r.note.includes(cfg.id)));
+    const parseDisplayDateMs = (dateStr: string): number => {
+      if (!dateStr || dateStr === 'Ongoing' || dateStr === 'Recent') return 0;
+      if (dateStr === 'Today') return Date.now();
+      const parsed = Date.parse(dateStr);
+      return Number.isNaN(parsed) ? 0 : parsed;
+    };
+
+    const builtBatches = allConfigs.map(cfg => {
+      const bReqs = cfg.id === 'REQ-INDIVIDUAL'
+        ? unbatchedSingles
+        : standardRequests.filter(r => r.id.startsWith(cfg.id) || (r.note && typeof r.note === 'string' && r.note.includes(cfg.id)));
       const employees = mapEmployees(bReqs, cfg.id);
       const assignedCount = employees.filter(e => Boolean(e.assignedClinicId || e.assignedClinicCode)).length;
       const totalEmployees = employees.length;
@@ -314,12 +410,23 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
       const doneCount = employees.filter(e => e.isCertified).length;
       const pendingCount = totalEmployees - doneCount;
 
+      const latestCreatedAt = bReqs.reduce((maxTs, r) => {
+        const ts = r.createdAt ? new Date(r.createdAt).getTime() : 0;
+        return ts > maxTs ? ts : maxTs;
+      }, 0);
+      const displayDateTs = parseDisplayDateMs(cfg.requestedDate);
+      const latestReq = bReqs[0];
+      const effectiveRequestedDate =
+        cfg.id === 'REQ-INDIVIDUAL' && latestReq?.createdAt
+          ? new Date(latestReq.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+          : cfg.requestedDate;
+
       return {
         id: cfg.id,
         title: cfg.title,
         plant: cfg.plant,
         plantCategory: cfg.plantCategory,
-        requestedDate: cfg.requestedDate,
+        requestedDate: effectiveRequestedDate,
         protocolType: cfg.protocolType,
         subStatus: cfg.subStatus,
         isOverdue: cfg.isOverdue,
@@ -328,15 +435,35 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
         unassignedCount,
         doneCount,
         pendingCount,
-        employees
+        employees,
+        _latestCreatedAt: latestCreatedAt || displayDateTs,
+        _displayDateTs: displayDateTs || latestCreatedAt
       };
     });
+
+    // Sort batches so the most recent requests/batches are always on top.
+    // Batches created within 60s of each other (e.g. initial DB seed) fall back to their requestedDate descending.
+    builtBatches.sort((a, b) => {
+      const createdDiff = b._latestCreatedAt - a._latestCreatedAt;
+      if (Math.abs(createdDiff) > 60_000) {
+        return createdDiff;
+      }
+      if (b._displayDateTs !== a._displayDateTs) {
+        return b._displayDateTs - a._displayDateTs;
+      }
+      if (createdDiff !== 0) {
+        return createdDiff;
+      }
+      return b.id.localeCompare(a.id, undefined, { numeric: true });
+    });
+
+    return builtBatches.map(({ _latestCreatedAt, _displayDateTs, ...batch }) => batch);
   }, [requests]);
 
-  // Single candidate clearance requests (non-batch requests)
+  // Single candidate clearance requests (non-batch normal requests)
   const singleRequests: BatchEmployee[] = useMemo(() => {
     const bulkIds = new Set(batches.flatMap(b => b.employees.map(e => e.id)));
-    const singles = requests.filter(r => !bulkIds.has(r.id));
+    const singles = requests.filter(r => !bulkIds.has(r.id) && !r.id?.startsWith('SR-'));
     return singles.map((r, idx) => {
       let meta: any = {};
       if (r.note) {
@@ -400,6 +527,10 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
       if (a.priority && !b.priority) return -1;
       if (!a.priority && b.priority) return 1;
 
+      const aCreated = a.rawRequest?.createdAt ? new Date(a.rawRequest.createdAt).getTime() : 0;
+      const bCreated = b.rawRequest?.createdAt ? new Date(b.rawRequest.createdAt).getTime() : 0;
+      if (bCreated !== aCreated) return bCreated - aCreated;
+
       return (a.empNo || '').localeCompare(b.empNo || '');
     });
   }, [singleRequests, singleSearch]);
@@ -420,10 +551,15 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
     });
   }, [batches, selectedPlant, batchSearch]);
 
-  // Active Selected Batch
+  // Active Selected Batch (defaults to newest matching batch on top)
   const activeBatch = useMemo(() => {
-    return batches.find(b => b.id === selectedBatchId) || batches[0];
-  }, [batches, selectedBatchId]);
+    return (
+      filteredBatches.find(b => b.id === selectedBatchId) ||
+      batches.find(b => b.id === selectedBatchId) ||
+      filteredBatches[0] ||
+      batches[0]
+    );
+  }, [batches, filteredBatches, selectedBatchId]);
 
   // Update assignCount when active batch changes
   useEffect(() => {
@@ -431,7 +567,76 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
       setAssignCount(activeBatch.unassignedCount ?? 0);
       setCurrentPage(1);
     }
-  }, [activeBatch.id]);
+  }, [activeBatch?.id]);
+
+  // Filtered Pre-Booked Slot Requests for the 'slots' toggle mode (most recent on top)
+  const filteredSlotQueue = useMemo(() => {
+    const filtered = slotQueue.filter((s: any) => {
+      if (selectedPlant !== 'ALL') {
+        const plantStr = `${s.plant || ''} ${s.title || ''} ${s.department || ''}`.toLowerCase();
+        if (!plantStr.includes(selectedPlant.toLowerCase())) return false;
+      }
+      if (slotStatusFilter === 'PENDING') {
+        if ((s.assignedSlots || 0) >= (s.requestedSlots || 0)) return false;
+      } else if (slotStatusFilter === 'FULL') {
+        if ((s.assignedSlots || 0) < (s.requestedSlots || 0)) return false;
+      }
+      if (slotSearch.trim()) {
+        const q = slotSearch.trim().toLowerCase();
+        return (
+          s.id?.toLowerCase().includes(q) ||
+          s.title?.toLowerCase().includes(q) ||
+          s.department?.toLowerCase().includes(q) ||
+          (s.plant && s.plant.toLowerCase().includes(q))
+        );
+      }
+      return true;
+    });
+
+    return [...filtered].sort((a: any, b: any) => {
+      const aTs = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bTs = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (bTs !== aTs) return bTs - aTs;
+      return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true });
+    });
+  }, [slotQueue, selectedPlant, slotStatusFilter, slotSearch]);
+
+  const activeSlotItem = useMemo(() => {
+    return slotQueue.find((s: any) => s.id === selectedSlotId) || filteredSlotQueue[0] || slotQueue[0] || null;
+  }, [slotQueue, filteredSlotQueue, selectedSlotId]);
+
+  // Infinite scroll refs & slices for Clearance Batches and Booked Slot Quotas sidebars
+  const batchListScrollRef = useRef<HTMLDivElement | null>(null);
+  const slotListScrollRef = useRef<HTMLDivElement | null>(null);
+
+  const batchListSlice = useInfiniteSlice(filteredBatches, {
+    initialCount: 10,
+    step: 8,
+    resetKey: `${selectedPlant}|${batchSearch}`
+  });
+
+  const slotListSlice = useInfiniteSlice(filteredSlotQueue, {
+    initialCount: 10,
+    step: 8,
+    resetKey: `${selectedPlant}|${slotStatusFilter}|${slotSearch}`
+  });
+
+  const slotTelemetry = useMemo(() => {
+    const totalSlotRequests = slotQueue.length;
+    const totalQuotaSlots = slotQueue.reduce((sum: number, s: any) => sum + (s.requestedSlots || 0), 0);
+    const totalAllocatedToClinics = slotQueue.reduce((sum: number, s: any) => sum + (s.allocatedSlots || 0), 0);
+    const totalWorkforceAssigned = slotQueue.reduce((sum: number, s: any) => sum + (s.assignedSlots || 0), 0);
+    const vacantSlots = Math.max(0, totalQuotaSlots - totalWorkforceAssigned);
+    const assignedPercent = totalQuotaSlots > 0 ? Math.round((totalWorkforceAssigned / totalQuotaSlots) * 100) : 0;
+    return {
+      totalSlotRequests,
+      totalQuotaSlots,
+      totalAllocatedToClinics,
+      totalWorkforceAssigned,
+      vacantSlots,
+      assignedPercent
+    };
+  }, [slotQueue]);
 
   // Filter counts for active batch
   const filterCounts = useMemo(() => {
@@ -596,8 +801,15 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
           if (aAssigned && !bAssigned) return 1;
           comp = (a.empNo || '').localeCompare(b.empNo || '');
         }
+      } else if (sortField === 'RECENT_FIRST') {
+        const aCreated = a.rawRequest?.createdAt ? new Date(a.rawRequest.createdAt).getTime() : 0;
+        const bCreated = b.rawRequest?.createdAt ? new Date(b.rawRequest.createdAt).getTime() : 0;
+        comp = bCreated - aCreated;
+        if (comp === 0) {
+          comp = (b.id || '').localeCompare(a.id || '', undefined, { numeric: true });
+        }
       } else {
-        // UNASSIGNED_FIRST (Default & recommended view)
+        // UNASSIGNED_FIRST (Default & recommended view — recent requests on top within each tier)
         const aAssigned = Boolean(a.assignedClinicId || a.assignedClinicCode);
         const bAssigned = Boolean(b.assignedClinicId || b.assignedClinicCode);
         if (!aAssigned && bAssigned) return -1;
@@ -622,6 +834,12 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
           if (aDays !== bDays) {
             return aDays - bDays;
           }
+        }
+
+        const aCreated = a.rawRequest?.createdAt ? new Date(a.rawRequest.createdAt).getTime() : 0;
+        const bCreated = b.rawRequest?.createdAt ? new Date(b.rawRequest.createdAt).getTime() : 0;
+        if (bCreated !== aCreated) {
+          return bCreated - aCreated;
         }
 
         comp = (a.empNo || '').localeCompare(b.empNo || '');
@@ -870,81 +1088,184 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
         </div>
       )}
 
-      {/* 1. TOP HEADER & PLANT FILTER TABS (Matching Page 5) */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-[22px] font-bold text-[#1B2430] tracking-tight">
-            Medical clearance requests
-          </h1>
-          <div className="text-xs text-[#5A6472] mt-0.5">
-            Review each batch, then assign employees to a clinic
+      {/* 1. TOP HEADER, REQUEST MODE TOGGLE & PLANT FILTER TABS */}
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-[22px] font-bold text-[#1B2430] tracking-tight">
+              Medical clearance requests
+            </h1>
+            <div className="text-xs text-[#5A6472] mt-0.5">
+              {requestMode === 'standard'
+                ? 'Review normally requested batches & individuals, then assign employees to a clinic'
+                : 'Assign employees into clinic quotas pre-booked via the Medical Slot Portal'}
+            </div>
+          </div>
+
+          {/* Industrial Plant Tabs */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {[
+              { id: 'ALL', label: 'All plants' },
+              { id: 'YANPET', label: 'Yanpet' },
+              { id: 'SABIC', label: 'SABIC Jubail' },
+              { id: 'SADARA', label: 'Sadara' }
+            ].map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setSelectedPlant(p.id as any)}
+                className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer min-h-[40px] ${
+                  selectedPlant === p.id
+                    ? 'bg-[#0A0F1D] text-white shadow-xs'
+                    : 'bg-white border border-[#DDE3E9] text-[#1B2430] hover:bg-slate-50'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Industrial Plant Tabs */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {[
-            { id: 'ALL', label: 'All plants' },
-            { id: 'YANPET', label: 'Yanpet' },
-            { id: 'SABIC', label: 'SABIC Jubail' },
-            { id: 'SADARA', label: 'Sadara' }
-          ].map((p) => (
+        {/* Request Type Toggle: Standard Requests vs Booked Slots & Workforce */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-2 rounded-2xl border border-[#DDE3E9] shadow-2xs">
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              key={p.id}
               type="button"
-              onClick={() => setSelectedPlant(p.id as any)}
-              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer min-h-[40px] ${
-                selectedPlant === p.id
-                  ? 'bg-[#0A0F1D] text-white shadow-xs'
-                  : 'bg-white border border-[#DDE3E9] text-[#1B2430] hover:bg-slate-50'
+              onClick={() => handleSwitchRequestMode('standard')}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                requestMode === 'standard'
+                  ? 'bg-[#0A0F1D] text-white shadow-sm'
+                  : 'bg-slate-50 text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200/70'
               }`}
             >
-              {p.label}
+              <span className="material-symbols-outlined text-[18px]">assignment</span>
+              <span>Standard Requests (Normally Requested)</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                requestMode === 'standard'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-amber-100 text-amber-800'
+              }`}>
+                {telemetry.pendingTotal} Pending / {telemetry.activeBatches} Batches
+              </span>
             </button>
-          ))}
+
+            <button
+              type="button"
+              onClick={() => handleSwitchRequestMode('slots')}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                requestMode === 'slots'
+                  ? 'bg-secondary text-white shadow-sm'
+                  : 'bg-slate-50 text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200/70'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[18px]">group_add</span>
+              <span>Slot Requested (Booked Slots &amp; Workforce)</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                requestMode === 'slots'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-orange-100 text-orange-800'
+              }`}>
+                {slotTelemetry.vacantSlots} Vacant / {slotTelemetry.totalSlotRequests} Slots
+              </span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 px-2">
+            {requestMode === 'slots' && (
+              <button
+                type="button"
+                onClick={() => navigate('/slots')}
+                className="text-xs font-bold text-secondary hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[16px]">calendar_add_on</span>
+                <span>Pre-Book / Split Clinics in Slot Portal</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* 2. 4 TOP KPI SUMMARY CARDS (Matching Page 5) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {/* Card 1: Active batches */}
-        <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
-          <div className="text-xs text-[#5A6472] font-medium">Active batches</div>
-          <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
-            {telemetry.activeBatches}
+      {/* 2. 4 TOP KPI SUMMARY CARDS */}
+      {requestMode === 'standard' ? (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {/* Card 1: Active batches */}
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+            <div className="text-xs text-[#5A6472] font-medium">Active batches</div>
+            <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+              {telemetry.activeBatches}
+            </div>
+            <div className="text-xs text-[#5A6472]">Yanpet, Sadara, SABIC</div>
           </div>
-          <div className="text-xs text-[#5A6472]">Yanpet, Sadara, SABIC</div>
-        </div>
 
-        {/* Card 2: Employees requested */}
-        <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
-          <div className="text-xs text-[#5A6472] font-medium">Employees requested</div>
-          <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
-            {telemetry.totalEmployees}
+          {/* Card 2: Employees requested */}
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+            <div className="text-xs text-[#5A6472] font-medium">Employees requested</div>
+            <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+              {telemetry.totalEmployees}
+            </div>
+            <div className="text-xs text-[#5A6472]">across {telemetry.departmentsCount} departments</div>
           </div>
-          <div className="text-xs text-[#5A6472]">across {telemetry.departmentsCount} departments</div>
-        </div>
 
-        {/* Card 3: Assigned */}
-        <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
-          <div className="text-xs text-[#5A6472] font-medium">Assigned</div>
-          <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
-            {telemetry.assignedTotal} <span className="text-sm font-semibold text-[#5A6472]">({telemetry.assignedPercent}%)</span>
+          {/* Card 3: Assigned */}
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+            <div className="text-xs text-[#5A6472] font-medium">Assigned</div>
+            <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+              {telemetry.assignedTotal} <span className="text-sm font-semibold text-[#5A6472]">({telemetry.assignedPercent}%)</span>
+            </div>
+            <div className="text-xs text-[#5A6472]">dispatched to clinics</div>
           </div>
-          <div className="text-xs text-[#5A6472]">awaiting allocation</div>
-        </div>
 
-        {/* Card 4: Pending assignment */}
-        <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
-          <div className="text-xs text-[#5A6472] font-medium">Pending assignment</div>
-          <div className="text-[28px] font-bold text-[#B45309] my-1 leading-tight tracking-tight">
-            {telemetry.pendingTotal}
+          {/* Card 4: Pending assignment */}
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+            <div className="text-xs text-[#5A6472] font-medium">Pending assignment</div>
+            <div className="text-[28px] font-bold text-[#B45309] my-1 leading-tight tracking-tight">
+              {telemetry.pendingTotal}
+            </div>
+            <div className="text-xs text-[#5A6472]">awaiting clinic selection</div>
           </div>
-          <div className="text-xs text-[#5A6472]">1 card expiring within 60 days</div>
         </div>
-      </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {/* Card 1: Pre-booked slot requests */}
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+            <div className="text-xs text-[#5A6472] font-medium">Booked Slot Requests</div>
+            <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+              {slotTelemetry.totalSlotRequests}
+            </div>
+            <div className="text-xs text-[#5A6472]">Active SR reservations</div>
+          </div>
 
-      {/* 3. MAIN SPLIT VIEW: CLEARANCE BATCHES (LEFT) + BATCH DISPATCH WORKSPACE (RIGHT) */}
+          {/* Card 2: Total quota slots */}
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+            <div className="text-xs text-[#5A6472] font-medium">Pre-Booked Quota Capacity</div>
+            <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+              {slotTelemetry.totalQuotaSlots}
+            </div>
+            <div className="text-xs text-[#5A6472]">{slotTelemetry.totalAllocatedToClinics} split across clinics</div>
+          </div>
+
+          {/* Card 3: Workforce Assigned */}
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+            <div className="text-xs text-[#5A6472] font-medium">Workforce Assigned</div>
+            <div className="text-[28px] font-bold text-emerald-700 my-1 leading-tight tracking-tight">
+              {slotTelemetry.totalWorkforceAssigned} <span className="text-sm font-semibold text-[#5A6472]">({slotTelemetry.assignedPercent}%)</span>
+            </div>
+            <div className="text-xs text-[#5A6472]">dispatched to booked clinic slots</div>
+          </div>
+
+          {/* Card 4: Remaining Vacant Slots */}
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+            <div className="text-xs text-[#5A6472] font-medium">Vacant Slots Remaining</div>
+            <div className="text-[28px] font-bold text-[#B45309] my-1 leading-tight tracking-tight">
+              {slotTelemetry.vacantSlots}
+            </div>
+            <div className="text-xs text-[#5A6472]">ready for employee assignment</div>
+          </div>
+        </div>
+      )}
+
+      {/* 3A. STANDARD REQUESTS SPLIT VIEW */}
+      {requestMode === 'standard' && activeBatch && (
       <div className="flex flex-col lg:flex-row gap-4 items-start w-full">
         {/* LEFT COLUMN: CLEARANCE BATCHES LIST - Compact width so table workspace gets maximum space */}
         <div className="w-full lg:w-[275px] xl:w-[290px] shrink-0 bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-3.5 flex flex-col h-[780px]">
@@ -982,9 +1303,12 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
             />
           </div>
 
-          {/* Batch Cards List - Scrollable Container */}
-          <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full">
-            {filteredBatches.map((batch) => {
+          {/* Batch Cards List - Scrollable Container with Infinite Scroll */}
+          <div
+            ref={batchListScrollRef}
+            className="flex-1 overflow-y-auto space-y-2.5 pr-1 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full"
+          >
+            {batchListSlice.visibleItems.map((batch) => {
               const isSelected = batch.id === activeBatch.id;
               const percent = batch.totalEmployees > 0 ? Math.round((batch.assignedCount / batch.totalEmployees) * 100) : 0;
 
@@ -1058,6 +1382,14 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
                 </div>
               );
             })}
+            <InfiniteScrollSentinel
+              hasMore={batchListSlice.hasMore}
+              onLoadMore={batchListSlice.loadMore}
+              visibleCount={batchListSlice.visibleCount}
+              totalCount={batchListSlice.totalCount}
+              itemLabel="batches"
+              scrollRootRef={batchListScrollRef}
+            />
           </div>
         </div>
 
@@ -1400,6 +1732,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
                   className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary cursor-pointer"
                 >
                   <option value="UNASSIGNED_FIRST">Unassigned First (Recommended)</option>
+                  <option value="RECENT_FIRST">Newest Requested First</option>
                   <option value="EXPIRING_FIRST">Expiring Cards First</option>
                   <option value="CLINIC">Assigned Medical Center</option>
                   <option value="DEPARTMENT">Department</option>
@@ -1857,9 +2190,216 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
           </div>
         </div>
       </div>
+      )}
+
+      {requestMode === 'standard' && !activeBatch && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center shadow-sm">
+          <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+            <span className="material-symbols-outlined text-[26px]">inbox</span>
+          </div>
+          <h3 className="font-display font-bold text-slate-900 text-base">No Standard Request Batches Found</h3>
+          <p className="text-xs text-slate-500 max-w-md mx-auto mt-1.5">
+            All normally requested items are cleared or filtered out. Switch to <span className="font-semibold text-indigo-700">Slot Requested</span> to assign employees to booked clinic slots, or adjust the plant filter above.
+          </p>
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleSwitchRequestMode('slots')}
+              className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition-colors cursor-pointer"
+            >
+              Open Slot Requested Queue
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* SLOT REQUESTED MODE: BOOKED SLOTS & WORKFORCE ASSIGNMENT */}
+      {requestMode === 'slots' && (
+        <div className="flex flex-col lg:flex-row gap-4 items-start w-full">
+          {/* Left Panel: Booked Slot Quotas List */}
+          <div className="w-full lg:w-[310px] xl:w-[330px] shrink-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-slate-100 bg-slate-50/70 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h2 className="font-display font-extrabold text-sm text-slate-900">
+                    Booked Slot Quotas ({filteredSlotQueue.length})
+                  </h2>
+                  <p className="text-[11px] text-slate-500">Select a slot quota to assign employees</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate('/slots')}
+                  className="px-2.5 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-bold hover:bg-indigo-100 transition-colors shrink-0 cursor-pointer"
+                >
+                  + Pre-Book Slot
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200">
+                {[
+                  { id: 'ALL', label: 'All' },
+                  { id: 'PENDING', label: 'Needs Workforce' },
+                  { id: 'FULL', label: 'Completed' }
+                ].map(pill => (
+                  <button
+                    key={pill.id}
+                    type="button"
+                    onClick={() => setSlotStatusFilter(pill.id as 'ALL' | 'PENDING' | 'FULL')}
+                    className={`flex-1 py-1 px-2 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
+                      slotStatusFilter === pill.id
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    {pill.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="relative">
+                <span className="material-symbols-outlined text-[16px] text-slate-400 absolute left-3 top-1/2 -translate-y-1/2">search</span>
+                <input
+                  type="text"
+                  value={slotSearch}
+                  onChange={e => setSlotSearch(e.target.value)}
+                  placeholder="Search SR ID, protocol, clinic..."
+                  className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+                />
+              </div>
+            </div>
+
+            <div ref={slotListScrollRef} className="divide-y divide-slate-100 max-h-[680px] overflow-y-auto">
+              {filteredSlotQueue.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-500 space-y-2">
+                  <p className="font-semibold text-slate-700">No booked slot quotas match this filter.</p>
+                  <p>Pre-book and split slots across clinics in the Slot Portal first.</p>
+                </div>
+              ) : (
+                <>
+                  {slotListSlice.visibleItems.map((s: any) => {
+                  const isSelected = activeSlotItem?.id === s.id;
+                  const pct = s.requestedSlots > 0 ? Math.min(100, Math.round((s.assignedSlots / s.requestedSlots) * 100)) : 0;
+                  const hasSplit = Array.isArray(s.activeAllocations) && s.activeAllocations.length > 0;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setSelectedSlotId(s.id)}
+                      className={`w-full text-left p-3.5 transition-all cursor-pointer border-l-4 ${
+                        isSelected
+                          ? 'bg-indigo-50/70 border-l-indigo-600'
+                          : 'bg-white hover:bg-slate-50 border-l-transparent'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="font-mono text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded">
+                          {s.id}
+                        </span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          s.remainingSlots === 0 && s.allocatedSlots > 0
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : hasSplit
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-rose-100 text-rose-700'
+                        }`}>
+                          {!hasSplit
+                            ? 'Needs Clinic Split'
+                            : s.remainingSlots === 0
+                              ? 'Fully Assigned'
+                              : `${s.remainingSlots} Unassigned`}
+                        </span>
+                      </div>
+
+                      <div className="font-bold text-xs text-slate-900 line-clamp-1">{s.title}</div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                        <span>{s.plant || 'General'}</span>
+                        <span>&bull;</span>
+                        <span>{s.department}</span>
+                        {s.needByDate && (
+                          <>
+                            <span>&bull;</span>
+                            <span>Due {s.needByDate}</span>
+                          </>
+                        )}
+                      </div>
+
+                      {hasSplit && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {s.activeAllocations.map((c: any) => (
+                            <span
+                              key={c.vendorId}
+                              className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200"
+                            >
+                              {c.vendorCode}: {c.assignedSlots}/{c.allocatedSlots}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="mt-2.5 space-y-1">
+                        <div className="flex justify-between text-[10px] font-semibold text-slate-600">
+                          <span>Workforce Assigned</span>
+                          <span>{s.assignedSlots} / {s.requestedSlots}</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${
+                              pct >= 100 ? 'bg-emerald-500' : 'bg-indigo-600'
+                            }`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+                  <InfiniteScrollSentinel
+                    hasMore={slotListSlice.hasMore}
+                    onLoadMore={slotListSlice.loadMore}
+                    visibleCount={slotListSlice.visibleCount}
+                    totalCount={slotListSlice.totalCount}
+                    itemLabel="slots"
+                    scrollRootRef={slotListScrollRef}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Right Panel: Inline SlotWorkforcePanel */}
+          <div className="flex-1 min-w-0 w-full">
+            {activeSlotItem ? (
+              <SlotWorkforcePanel
+                slotId={activeSlotItem.id}
+                inline={true}
+                isActive={true}
+                onAssignmentUpdated={loadData}
+                onGoToSlotPortal={() => navigate('/slots')}
+              />
+            ) : (
+              <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center shadow-sm">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-3">
+                  <span className="material-symbols-outlined text-[26px]">event_available</span>
+                </div>
+                <h3 className="font-display font-bold text-slate-900 text-base">No Booked Slot Quota Selected</h3>
+                <p className="text-xs text-slate-500 max-w-md mx-auto mt-1.5">
+                  Pre-book bulk slots and split them evenly among clinics in the Slot Portal, then come here to assign employees to each clinic's reserved quota.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => navigate('/slots')}
+                  className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition-colors cursor-pointer"
+                >
+                  Go to Slot Portal
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* MODAL 1: TEST PROTOCOL SPECS */}
-      {isProtocolSpecsOpen && (
+      {isProtocolSpecsOpen && activeBatch && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
@@ -1922,7 +2462,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
       )}
 
       {/* MODAL 2: ADD STAFF TO BATCH */}
-      {isAddStaffOpen && (
+      {isAddStaffOpen && activeBatch && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-5 space-y-4">
             <div className="flex items-start justify-between pb-2 border-b border-slate-100">

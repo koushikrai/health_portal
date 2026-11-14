@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { SlotAssignmentModal } from '../components/slots/SlotAssignmentModal';
 
@@ -65,6 +66,8 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
   userName = '',
   onSwitchRole
 }) => {
+  const navigate = useNavigate();
+
   // Strict Role Guardrail: Medical Slot Portal is for HR, Requester, Central Medical Team & Admin
   if (!['CENTRAL', 'ADMIN', 'HR', 'REQUESTER'].includes(userRole)) {
     return (
@@ -107,6 +110,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
   const [allClinics, setAllClinics] = useState<ClinicOption[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<string>('');
+  const [lastConfirmedSlotId, setLastConfirmedSlotId] = useState<string | null>(null);
 
   // Slot Governance Expiry State
   const [slotExpiryDays, setSlotExpiryDays] = useState<number>(7);
@@ -173,9 +177,13 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
     }).catch(console.error);
   }, [showExpired]);
 
-  const showToast = (msg: string) => {
+  const showToast = (msg: string, confirmedSlotId: string | null = null) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 4500);
+    setLastConfirmedSlotId(confirmedSlotId);
+    setTimeout(() => {
+      setToastMessage('');
+      setLastConfirmedSlotId(null);
+    }, 6500);
   };
 
   const loadQueueData = async () => {
@@ -404,7 +412,10 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
         status: totalAllocated >= req.requestedSlots ? 'CONFIRMED' : 'ALLOCATED'
       });
 
-      showToast(res.data?.message || `Confirmed allocation for ${req.id} (${totalAllocated} of ${req.requestedSlots} slots).`);
+      showToast(
+        res.data?.message || `Confirmed allocation for ${req.id} (${totalAllocated} of ${req.requestedSlots} slots). Now ready for employee assignment in Request Queue.`,
+        req.id
+      );
       loadQueueData();
     } catch (e: any) {
       alert(`Allocation failed: ${e.response?.data?.error || e.message}`);
@@ -563,9 +574,18 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
 
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 bg-[#0A0F1D] text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-xl flex items-center gap-2.5 animate-in slide-in-from-bottom-2 duration-150 border border-slate-700">
-          <span className="material-symbols-outlined text-secondary text-[18px]">check_circle</span>
+        <div className="fixed bottom-5 right-5 z-50 bg-[#0A0F1D] text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 animate-in slide-in-from-bottom-2 duration-150 border border-slate-700 max-w-lg">
+          <span className="material-symbols-outlined text-secondary text-[18px] shrink-0">check_circle</span>
           <span>{toastMessage}</span>
+          {lastConfirmedSlotId && (
+            <button
+              type="button"
+              onClick={() => navigate(`/requests?mode=slots&slotId=${encodeURIComponent(lastConfirmedSlotId)}`)}
+              className="ml-2 px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary-hover text-white font-bold text-[11px] shrink-0 cursor-pointer transition-colors shadow-2xs whitespace-nowrap"
+            >
+              Assign in Request Queue &rarr;
+            </button>
+          )}
         </div>
       )}
 
@@ -694,11 +714,12 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
 
                       <button
                         type="button"
-                        onClick={() => setAssigningSlotId(req.id)}
-                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-semibold transition-all min-h-[40px] cursor-pointer"
-                        title="View and assign workforce to this quota"
+                        onClick={() => navigate(`/requests?mode=slots&slotId=${encodeURIComponent(req.id)}`)}
+                        className="px-3.5 py-2 bg-orange-50 hover:bg-orange-100 text-orange-800 border border-orange-200 rounded-lg text-xs font-bold transition-all min-h-[40px] cursor-pointer flex items-center gap-1.5"
+                        title="Open this booked slot in Request Queue to assign employees"
                       >
-                        Workforce ({req.assignedSlots || 0}/{req.requestedSlots})
+                        <span className="material-symbols-outlined text-[16px]">group_add</span>
+                        <span>Assign in Request Queue ({req.assignedSlots || 0}/{req.requestedSlots}) &rarr;</span>
                       </button>
 
                       <button
