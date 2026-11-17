@@ -234,7 +234,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
   vendorId,
   onNavigateToTab
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'entry' | 'inbound' | 'slots' | 'invoice'>('entry');
+  const [activeSubTab, setActiveSubTab] = useState<'inbound' | 'slots' | 'invoice' | 'entry'>('inbound');
   const [viewMode, setViewMode] = useState<'table' | 'workspace'>('table');
   const [tableSearch, setTableSearch] = useState<string>('');
   const [clinics, setClinics] = useState<ClinicRecord[]>([]);
@@ -328,9 +328,6 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
   const [inboundClinicFilter, setInboundClinicFilter] = useState<string>('ALL');
   const [inboundStatusFilter, setInboundStatusFilter] = useState<string>('ALL');
   const [inboundSearchQuery, setInboundSearchQuery] = useState<string>('');
-  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState<boolean>(true);
-  const [isSyncingLive, setIsSyncingLive] = useState<boolean>(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
 
   // Clinic Slot Scheduler State
   const [schedulerDateFilter, setSchedulerDateFilter] = useState<'ALL' | 'TODAY' | 'TOMORROW' | 'WEEK' | 'CUSTOM'>('ALL');
@@ -427,16 +424,13 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
   }, [selectedVendorId, currentClinic.code]);
 
   const loadClinicData = async (vId = selectedVendorId, silent = false) => {
-    if (silent) {
-      setIsSyncingLive(true);
-    } else {
+    if (!silent) {
       setLoading(true);
     }
     try {
       const res = await api.getRequests({ vendorId: vId });
       const reqList = res.data?.requests || [];
       setRequests(reqList);
-      setLastSyncedAt(new Date());
 
       // Auto-select first request if active candidate is not in list
       if (reqList.length > 0) {
@@ -449,9 +443,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
     } catch (e) {
       console.error('Failed to load clinic requests:', e);
     } finally {
-      if (silent) {
-        setIsSyncingLive(false);
-      } else {
+      if (!silent) {
         setLoading(false);
       }
     }
@@ -459,7 +451,6 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
 
   // Realtime auto-polling (every 8s) & tab-focus sync so newly assigned requests appear automatically
   useEffect(() => {
-    if (!autoRefreshEnabled) return;
     const effectiveVendor =
       activeSubTab === 'inbound' && inboundClinicFilter === 'ALL' ? 'ALL' : selectedVendorId;
 
@@ -482,7 +473,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
       window.removeEventListener('focus', handleFocusOrVisible);
       document.removeEventListener('visibilitychange', handleFocusOrVisible);
     };
-  }, [autoRefreshEnabled, selectedVendorId, activeSubTab, inboundClinicFilter]);
+  }, [selectedVendorId, activeSubTab, inboundClinicFilter]);
 
   // 3. Helper to parse diagnostic lab values from request report or notes
   const parseLabData = (r: any): LabData => {
@@ -1986,106 +1977,110 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
   return (
     <div className="space-y-5">
       {/* 1. TOP CLINIC BANNER & NAVIGATION BAR */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-4 lg:p-5">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-slate-100">
-          <div className="flex items-center gap-3.5">
-            <div className="h-12 w-12 rounded-2xl bg-primary text-white flex items-center justify-center shadow-sm shrink-0">
-              <span className="material-symbols-outlined text-[26px]">local_hospital</span>
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-4 lg:p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-3.5 min-w-0">
+            <div className="h-11 w-11 rounded-2xl bg-primary text-white flex items-center justify-center shadow-sm shrink-0">
+              <span className="material-symbols-outlined text-[24px]">local_hospital</span>
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="font-display font-extrabold text-xl text-slate-900 leading-tight">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="font-display font-extrabold text-lg sm:text-xl text-slate-900 leading-tight truncate">
                   {currentClinic.name}
                 </h1>
-                {/* CLINIC SWITCHER: ADMIN ONLY; LOCKED FOR CLINIC DESK USERS */}
-                {userRole === 'ADMIN' ? (
-                  <select
-                    value={selectedVendorId}
-                    onChange={(e) => {
-                      const nextVendorId = e.target.value;
-                      setSelectedVendorId(nextVendorId);
-                      loadClinicData(nextVendorId);
-                    }}
-                    className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold px-2 py-1 rounded-lg border border-slate-300 focus:outline-none cursor-pointer"
-                  >
-                    {clinics.map(c => (
-                      <option key={c.id} value={c.id}>{c.code} - {c.name}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <span className="text-xs bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded-lg border border-slate-200">
-                    {currentClinic.code}
-                  </span>
-                )}
+                <span className="text-[11px] bg-slate-100 text-slate-700 font-mono font-bold px-2 py-0.5 rounded-md border border-slate-200">
+                  {currentClinic.code}
+                </span>
               </div>
+              <p className="text-xs text-slate-500 mt-0.5 truncate">
+                SAP Contract <span className="font-mono font-semibold text-slate-700">{currentClinic.contractNo}</span> &bull; {currentClinic.location}
+              </p>
             </div>
           </div>
 
-          {/* Sub-Tab Navigation Pills with Real-Time Dynamic Counts */}
-          <div className="flex flex-wrap items-center gap-1.5 bg-slate-100/80 p-1.5 rounded-xl border border-slate-200/80">
-            <button
-              onClick={() => setActiveSubTab('entry')}
-              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                activeSubTab === 'entry'
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[17px]">biotech</span>
-              <span>Test & Lab Entry</span>
-              <span className="px-1.5 py-0.2 rounded-full bg-white/20 text-white text-[10px]">Active</span>
-            </button>
-
-            <button
-              onClick={() => setActiveSubTab('inbound')}
-              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                activeSubTab === 'inbound'
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[17px]">move_to_inbox</span>
-              <span>Inbound Requests</span>
-              <span className="px-1.5 py-0.2 rounded-full bg-red-100 text-red-700 font-bold text-[10px]">
-                {requests.length}
+          {/* CLINIC SWITCHER: ADMIN ONLY */}
+          {userRole === 'ADMIN' && (
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 hidden md:inline">
+                Medical Center:
               </span>
-            </button>
-
-            <button
-              onClick={() => setActiveSubTab('slots')}
-              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                activeSubTab === 'slots'
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[17px]">calendar_month</span>
-              <span>Slot Scheduler</span>
-              <span className="px-1.5 py-0.2 rounded-full bg-sky-100 text-sky-800 font-bold text-[10px]">
-                {requests.filter(r => r.apptDate).length} Booked
-              </span>
-            </button>
-
-            <button
-              onClick={() => setActiveSubTab('invoice')}
-              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                activeSubTab === 'invoice'
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[17px]">receipt_long</span>
-              <span>Invoice Clearance</span>
-              <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
-                {completedRequests.length} Ready
-              </span>
-            </button>
-          </div>
+              <select
+                value={selectedVendorId}
+                onChange={(e) => {
+                  const nextVendorId = e.target.value;
+                  setSelectedVendorId(nextVendorId);
+                  loadClinicData(nextVendorId);
+                }}
+                className="text-xs bg-slate-50 hover:bg-slate-100 text-slate-800 font-semibold px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-primary cursor-pointer shadow-2xs min-w-[220px]"
+              >
+                {clinics.map(c => (
+                  <option key={c.id} value={c.id}>{c.code} - {c.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
+        {/* Sub-Tab Navigation Bar: 1. Inbound Requests -> 2. Slot Scheduler -> 3. Invoice Clearance -> 4. Test & Lab Entry */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 bg-slate-100/90 p-1.5 rounded-2xl border border-slate-200/80">
+          {[
+            {
+              id: 'inbound' as const,
+              label: 'Inbound Requests',
+              icon: 'move_to_inbox',
+              badge: String(requests.length),
+              inactiveBadgeClass: 'bg-rose-100 text-rose-700'
+            },
+            {
+              id: 'slots' as const,
+              label: 'Slot Scheduler',
+              icon: 'calendar_month',
+              badge: `${requests.filter(r => r.apptDate).length} Booked`,
+              inactiveBadgeClass: 'bg-sky-100 text-sky-800'
+            },
+            {
+              id: 'invoice' as const,
+              label: 'Invoice Clearance',
+              icon: 'receipt_long',
+              badge: `${completedRequests.length} Ready`,
+              inactiveBadgeClass: 'bg-emerald-100 text-emerald-800'
+            },
+            {
+              id: 'entry' as const,
+              label: 'Test & Lab Entry',
+              icon: 'biotech',
+              badge: 'Active',
+              inactiveBadgeClass: 'bg-slate-200/90 text-slate-700'
+            }
+          ].map((tab) => {
+            const isActive = activeSubTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveSubTab(tab.id)}
+                className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
+                  isActive
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[17px]">{tab.icon}</span>
+                <span>{tab.label}</span>
+                <span
+                  className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                    isActive ? 'bg-white/20 text-white' : tab.inactiveBadgeClass
+                  }`}
+                >
+                  {tab.badge}
+                </span>
+              </button>
+            );
+          })}
+        </div>
 
         {/* 3. LIVE EXECUTIVE METRICS STRIP (100% Dynamically Calculated from Database) */}
-        <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {/* KPI 1: TODAY EXECUTED */}
           <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3.5 flex flex-col justify-between">
             <div className="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase tracking-wider">
@@ -2108,12 +2103,6 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 endX={100}
                 endY={7}
               />
-            </div>
-            <div className="mt-2 h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary rounded-full transition-all duration-500"
-                style={{ width: `${Math.max(5, kpis.throughputPercent)}%` }}
-              ></div>
             </div>
           </div>
 
@@ -2140,12 +2129,6 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 endY={28}
               />
             </div>
-            <div className="mt-2 h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-secondary rounded-full transition-all duration-500"
-                style={{ width: `${Math.min(100, (kpis.pendingSignOff / (kpis.total || 1)) * 100)}%` }}
-              ></div>
-            </div>
           </div>
 
           {/* KPI 3: CARDS ISSUED & SYNCED */}
@@ -2170,12 +2153,6 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 endX={100}
                 endY={6}
               />
-            </div>
-            <div className="mt-2 h-1.5 w-full bg-emerald-200 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-emerald-600 rounded-full transition-all duration-500"
-                style={{ width: `${Math.max(8, (kpis.cardsIssued / (kpis.total || 1)) * 100)}%` }}
-              ></div>
             </div>
           </div>
 
@@ -2202,12 +2179,6 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 endY={15}
               />
             </div>
-            <div className="mt-2 h-1.5 w-full bg-amber-200 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-amber-500 rounded-full transition-all duration-500"
-                style={{ width: `${Math.min(100, Math.max(5, (kpis.secondaryReview / (kpis.total || 1)) * 100))}%` }}
-              ></div>
-            </div>
           </div>
         </div>
       </div>
@@ -2216,18 +2187,18 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
       {activeSubTab === 'entry' && (() => {
         const renderCandidateTable = (
           candidateList: ParsedCandidate[],
-          showDateCol: boolean = false,
-          isOneByOneView: boolean = false
+          _showDateCol: boolean = false,
+          _isOneByOneView: boolean = false
         ) => (
           <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-2xs">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50/90 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold tracking-wider">
                 <tr>
                   <th className="py-3 px-3.5">1. Employee Details</th>
-                  <th className="py-3 px-3.5">2. Name of Report / Protocol</th>
+                  <th className="py-3 px-3.5">2. SAP ID</th>
                   <th className="py-3 px-3.5">3. Iqama Number</th>
-                  <th className="py-3 px-3.5">{showDateCol ? '4. Requested Date' : '4. Issue Date'}</th>
-                  <th className="py-3 px-3.5">5. Expiry Date</th>
+                  <th className="py-3 px-3.5">4. Name of Report / Protocol</th>
+                  <th className="py-3 px-3.5">5. Requested Date</th>
                   <th className="py-3 px-3.5">6. Medical Center</th>
                   <th className="py-3 px-3.5">Test & Certificate Status</th>
                   <th className="py-3 px-3.5 text-right">Actions</th>
@@ -2245,7 +2216,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                       key={c.id}
                       className={`transition-colors ${isSelected ? 'bg-amber-50/70' : 'hover:bg-slate-50/80'}`}
                     >
-                      {/* 1. Name & Badge */}
+                      {/* 1. Employee Details (Name Only) */}
                       <td className="py-3 px-3.5">
                         <div className="flex items-center gap-2.5">
                           <span
@@ -2255,44 +2226,35 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                           >
                             {c.initials}
                           </span>
-                          <div>
-                            <div className="font-bold text-slate-900">{c.name}</div>
-                            <div className="text-[11px] text-slate-400 font-mono">
-                              SAP: {c.employeeNo} &bull; <span className="text-slate-500">{c.deptFull || c.roleDept}</span>
-                            </div>
-                          </div>
+                          <div className="font-bold text-slate-900">{c.name}</div>
                         </div>
                       </td>
 
-                      {/* 2. Name of Report / Protocol Design */}
-                      <td className="py-3 px-3.5">
-                        <div className="font-semibold text-slate-800">{c.protocol}</div>
-                        <div className="text-[10px] text-slate-400">Occupational Fitness Protocol</div>
+                      {/* 2. SAP ID */}
+                      <td className="py-3 px-3.5 font-mono font-bold text-slate-700 whitespace-nowrap">
+                        {c.employeeNo || '—'}
                       </td>
 
                       {/* 3. Iqama Number */}
-                      <td className="py-3 px-3.5">
+                      <td className="py-3 px-3.5 whitespace-nowrap">
                         <span className="font-mono font-bold text-primary bg-primary/5 px-2.5 py-1 rounded-md border border-primary/20 text-xs">
                           {c.iqamaId}
                         </span>
                       </td>
 
-                      {/* 4. Issue Date or Request Date */}
-                      <td className="py-3 px-3.5 font-mono text-slate-700">
-                        {showDateCol ? reqDate : c.issueDate}
+                      {/* 4. Name of Report / Protocol */}
+                      <td className="py-3 px-3.5">
+                        <div className="font-semibold text-slate-800">{c.protocol}</div>
                       </td>
 
-                      {/* 5. Expiry Date */}
-                      <td className="py-3 px-3.5 font-mono">
-                        <span className="font-bold text-emerald-700">
-                          {c.expiryDate}
-                        </span>
+                      {/* 5. Requested Date */}
+                      <td className="py-3 px-3.5 font-mono text-slate-700 whitespace-nowrap">
+                        {reqDate}
                       </td>
 
-                      {/* 6. Medical Center Name */}
+                      {/* 6. Medical Center */}
                       <td className="py-3 px-3.5">
                         <div className="font-bold text-slate-800">{c.rawRequest?.vendor?.name || currentClinic.name}</div>
-                        <div className="text-[10px] text-slate-400">CR: {currentClinic.crNumber}</div>
                       </td>
 
                       {/* Test & Certificate Status */}
@@ -2420,12 +2382,75 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
         );
 
         return (
-          <div className="space-y-6">
+          <div className="space-y-4">
+            {/* View Mode Toggle: Single View vs Bulk View */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-2.5 rounded-2xl border border-slate-200/90 shadow-2xs">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTableSection('single')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                    tableSection === 'single'
+                      ? 'bg-primary text-white shadow-xs'
+                      : 'bg-slate-50 text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200/80'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[17px]">person</span>
+                  <span>Single View</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      tableSection === 'single' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {oneByOneFilteredCandidates.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTableSection('bulk')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                    tableSection === 'bulk'
+                      ? 'bg-primary text-white shadow-xs'
+                      : 'bg-slate-50 text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200/80'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[17px]">folder_copy</span>
+                  <span>Bulk View</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      tableSection === 'bulk' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {bulkDateGroups.length} Batches
+                  </span>
+                </button>
+              </div>
+
+              {tableSection === 'bulk' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedPdfFiles([]);
+                      setUploadResult(null);
+                      setIsBulkUploadModalOpen(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-secondary hover:bg-secondary-hover text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[17px]">drive_folder_upload</span>
+                    <span>Upload Folder of Reports</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* ================================================================= */}
-            {/* 1. TOP HORIZONTAL SECTION: BULK UPLOAD & BATCH QUEUE */}
+            {/* 1. BULK VIEW: BULK UPLOAD & BATCH QUEUE */}
             {/* ================================================================= */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-4">
-              {/* Header */}
+            {tableSection === 'bulk' && (
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-4 animate-in fade-in-50 duration-150">
+                {/* Header */}
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-3 border-b border-slate-100">
                 <div>
                   <h2 className="font-display font-extrabold text-base text-slate-900">
@@ -2707,68 +2732,54 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 </div>
               )}
             </div>
+            )}
 
             {/* ================================================================= */}
-            {/* 2. BOTTOM HORIZONTAL SECTION: CHOOSE ONE BY ONE */}
+            {/* 2. SINGLE VIEW: INDIVIDUAL CANDIDATE VERIFICATION & LAB ENTRY */}
             {/* ================================================================= */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-4">
-              {/* Bottom Section Header */}
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-slate-100">
-                <div className="flex items-start gap-3">
-                  <div className="h-10 w-10 rounded-xl bg-secondary/10 text-secondary border border-secondary/20 flex items-center justify-center shrink-0 mt-0.5">
-                    <span className="material-symbols-outlined text-[22px]">person_search</span>
-                  </div>
+            {tableSection === 'single' && (
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-4 animate-in fade-in-50 duration-150">
+                {/* Header (Cleaned: icon, tag & description removed) */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-slate-100">
                   <div>
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-md bg-secondary/15 text-secondary px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider">
-                        Bottom Section: Choose One by One
-                      </span>
-                      <h2 className="font-display font-extrabold text-base text-slate-900">
-                        Individual Candidate Verification & Lab Entry
-                      </h2>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Directly search any candidate by 10-digit Iqama or SAP ID, filter by test design/protocol, and update clinical lab records.
-                    </p>
+                    <h2 className="font-display font-extrabold text-base text-slate-900">
+                      Individual Candidate Verification & Lab Entry
+                    </h2>
                   </div>
-                </div>
 
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="px-2.5 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-600 font-medium">
-                    Showing <strong className="text-slate-900">{oneByOneFilteredCandidates.length}</strong> of <strong className="text-slate-700">{candidates.length}</strong> candidates
-                  </span>
-                </div>
-              </div>
-
-              {/* Filters Bar: ID Search + Design Filter + Department Filter + Status Filter */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 p-3.5 bg-slate-50/90 rounded-xl border border-slate-200/90 items-end">
-                {/* 1. ID Search (Iqama # / SAP Badge / Name) */}
-                <div className="lg:col-span-4 relative">
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                    ID Search (Iqama # / SAP ID / Name)
-                  </label>
-                  <div className="relative">
-                    <span className="material-symbols-outlined absolute left-2.5 top-2 text-slate-400 text-[18px]">
-                      badge
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="px-2.5 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-600 font-medium">
+                      Showing <strong className="text-slate-900">{oneByOneFilteredCandidates.length}</strong> of <strong className="text-slate-700">{candidates.length}</strong> candidates
                     </span>
-                    <input
-                      type="text"
-                      placeholder="Search Iqama # (10 digits), SAP ID, Name..."
-                      value={oneByOneIdSearch}
-                      onChange={(e) => setOneByOneIdSearch(e.target.value)}
-                      className="w-full pl-8.5 pr-8 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-secondary bg-white shadow-2xs"
-                    />
-                    {oneByOneIdSearch && (
-                      <button
-                        type="button"
-                        onClick={() => setOneByOneIdSearch('')}
-                        className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">cancel</span>
-                      </button>
-                    )}
                   </div>
                 </div>
+
+                {/* Filters Bar: ID Search + Design Filter + Department Filter + Status Filter */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 p-3.5 bg-slate-50/90 rounded-xl border border-slate-200/90 items-end">
+                  {/* 1. ID Search (Iqama # / SAP ID / Name) - Cleaned (badge icon removed) */}
+                  <div className="lg:col-span-4 relative">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                      ID Search (Iqama # / SAP ID / Name)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Search Iqama # (10 digits), SAP ID, Name..."
+                        value={oneByOneIdSearch}
+                        onChange={(e) => setOneByOneIdSearch(e.target.value)}
+                        className="w-full px-3 pr-8 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-secondary bg-white shadow-2xs"
+                      />
+                      {oneByOneIdSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setOneByOneIdSearch('')}
+                          className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">cancel</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
 
                 {/* 2. Design / Protocol Filter */}
                 <div className="lg:col-span-3">
@@ -2873,6 +2884,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 renderCandidateTable(oneByOneFilteredCandidates, false, true)
               )}
             </div>
+            )}
           </div>
         );
       })()}
@@ -2902,36 +2914,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Live Auto-Sync Pill */}
-              <button
-                type="button"
-                onClick={() => setAutoRefreshEnabled(prev => !prev)}
-                title={autoRefreshEnabled ? 'Real-time polling active every 8s (click to pause)' : 'Auto-sync paused (click to resume)'}
-                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer border ${
-                  autoRefreshEnabled
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                    : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
-                }`}
-              >
-                <span
-                  className={`h-2 w-2 rounded-full ${
-                    autoRefreshEnabled
-                      ? isSyncingLive
-                        ? 'bg-emerald-500 animate-ping'
-                        : 'bg-emerald-500 animate-pulse'
-                      : 'bg-slate-400'
-                  }`}
-                />
-                <span>
-                  {autoRefreshEnabled
-                    ? isSyncingLive
-                      ? 'Syncing...'
-                      : `Live Sync${lastSyncedAt ? ` • ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}`
-                    : 'Live Sync Paused'}
-                </span>
-              </button>
-
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               {/* Grouping Mode Toggle: Batch Wise vs Flat List */}
               <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
                 <button
@@ -3181,6 +3164,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                     <tr>
                       <th className="py-3 px-3">Request ID</th>
                       <th className="py-3 px-3">Employee</th>
+                      <th className="py-3 px-3">SAP ID</th>
                       <th className="py-3 px-3">Iqama / National ID</th>
                       <th className="py-3 px-3">Clinic Tested</th>
                       <th className="py-3 px-3">Department</th>
@@ -3193,7 +3177,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                   <tbody className="divide-y divide-slate-100 font-medium">
                     {rows.length === 0 ? (
                       <tr>
-                        <td colSpan={9} className="py-8 text-center text-slate-400">
+                        <td colSpan={10} className="py-8 text-center text-slate-400">
                           No inbound requests match the selected filter criteria.
                         </td>
                       </tr>
@@ -3201,11 +3185,11 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                       rows.map((r) => (
                         <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
                           <td className="py-3 px-3 font-mono font-bold text-slate-900">{r.id}</td>
-                          <td className="py-3 px-3">
-                            <div className="font-bold text-slate-800">{r.employee?.name || 'Worker'}</div>
-                            <div className="text-[11px] font-mono text-slate-400">{r.employee?.employeeNo}</div>
+                          <td className="py-3 px-3 font-bold text-slate-800">{r.employee?.name || 'Worker'}</td>
+                          <td className="py-3 px-3 font-mono font-bold text-slate-700 whitespace-nowrap">
+                            {r.employee?.employeeNo || '—'}
                           </td>
-                          <td className="py-3 px-3 font-mono text-slate-600">{r.employee?.iqamaId || '-'}</td>
+                          <td className="py-3 px-3 font-mono text-slate-600 whitespace-nowrap">{r.employee?.iqamaId || '-'}</td>
                           <td className="py-3 px-3">
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
                               <span className="material-symbols-outlined text-[12px] text-slate-400">local_hospital</span>
@@ -3382,55 +3366,18 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
       {/* 6. APPOINTMENT SLOTS SCHEDULER TAB */}
       {activeSubTab === 'slots' && (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-5 space-y-5">
-          {/* Header & Clinic Shift Operating Hours */}
+          {/* Header */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between pb-4 border-b border-slate-100 gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-                  <span className="material-symbols-outlined text-[20px]">calendar_month</span>
-                </span>
-                <h3 className="font-display font-extrabold text-base text-slate-900">
-                  Clinic Appointment & Shift Scheduler ({currentClinic.code})
-                </h3>
-              </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Manage appointment bookings, time blocks, and worker arrivals for <span className="font-semibold text-slate-800">{currentClinic.name}</span>
-              </p>
+            <div className="flex items-center gap-2">
+              <span className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                <span className="material-symbols-outlined text-[20px]">calendar_month</span>
+              </span>
+              <h3 className="font-display font-extrabold text-base text-slate-900">
+                Clinic Appointment & Shift Scheduler ({currentClinic.code})
+              </h3>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold px-3 py-1.5 flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>Active Operating Hours: 08:00 AM – 20:00 PM</span>
-              </span>
-              {/* Live Auto-Sync Pill */}
-              <button
-                type="button"
-                onClick={() => setAutoRefreshEnabled(prev => !prev)}
-                title={autoRefreshEnabled ? 'Real-time polling active every 8s (click to pause)' : 'Auto-sync paused (click to resume)'}
-                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer border ${
-                  autoRefreshEnabled
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                    : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
-                }`}
-              >
-                <span
-                  className={`h-2 w-2 rounded-full ${
-                    autoRefreshEnabled
-                      ? isSyncingLive
-                        ? 'bg-emerald-500 animate-ping'
-                        : 'bg-emerald-500 animate-pulse'
-                      : 'bg-slate-400'
-                  }`}
-                />
-                <span>
-                  {autoRefreshEnabled
-                    ? isSyncingLive
-                      ? 'Syncing...'
-                      : `Live Sync${lastSyncedAt ? ` • ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}`
-                    : 'Live Sync Paused'}
-                </span>
-              </button>
               <button
                 type="button"
                 onClick={() => loadClinicData(selectedVendorId)}
@@ -3711,14 +3658,9 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                   <span className="h-8 w-8 rounded-xl bg-amber-500/10 text-amber-700 flex items-center justify-center shrink-0">
                     <span className="material-symbols-outlined text-[20px]">notification_important</span>
                   </span>
-                  <div>
-                    <h4 className="font-display font-extrabold text-sm text-amber-900">
-                      {shiftGroups.unscheduled.length} Candidates Awaiting Appointment Booking
-                    </h4>
-                    <p className="text-xs text-amber-700 mt-0.5">
-                      These workforce clearance requests have been assigned to {currentClinic.name} but do not have an appointment date slotted yet.
-                    </p>
-                  </div>
+                  <h4 className="font-display font-extrabold text-sm text-amber-900">
+                    {shiftGroups.unscheduled.length} Candidates Awaiting Appointment Booking
+                  </h4>
                 </div>
               </div>
 
@@ -4010,7 +3952,8 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                     <tr>
                       <th className="py-3 px-3">Request ID</th>
                       <th className="py-3 px-3">Candidate</th>
-                      <th className="py-3 px-3">Iqama / Badge</th>
+                      <th className="py-3 px-3">SAP ID</th>
+                      <th className="py-3 px-3">Iqama Number</th>
                       <th className="py-3 px-3">Clinic Facility</th>
                       <th className="py-3 px-3">Screening Protocol</th>
                       <th className="py-3 px-3">Appointment Date</th>
@@ -4021,7 +3964,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                   <tbody className="divide-y divide-slate-100">
                     {rows.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="py-8 text-center text-slate-400">
+                        <td colSpan={9} className="py-8 text-center text-slate-400">
                           No candidate appointments match your filter criteria.
                         </td>
                       </tr>
@@ -4030,9 +3973,11 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                         <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
                           <td className="py-3 px-3 font-mono font-bold text-slate-900">{r.id}</td>
                           <td className="py-3 px-3 font-bold text-slate-800">{r.employee?.name || 'Worker'}</td>
-                          <td className="py-3 px-3 font-mono text-slate-600">
-                            <div>{r.employee?.iqamaId || '—'}</div>
-                            <div className="text-[10px] text-slate-400 font-mono">{r.employee?.employeeNo}</div>
+                          <td className="py-3 px-3 font-mono font-bold text-slate-700 whitespace-nowrap">
+                            {r.employee?.employeeNo || '—'}
+                          </td>
+                          <td className="py-3 px-3 font-mono text-slate-600 whitespace-nowrap">
+                            {r.employee?.iqamaId || '—'}
                           </td>
                           <td className="py-3 px-3">
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
@@ -4040,15 +3985,10 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                             </span>
                           </td>
                           <td className="py-3 px-3 text-slate-700 font-medium">{r.test?.name || 'General Medical'}</td>
-                          <td className="py-3 px-3">
+                          <td className="py-3 px-3 whitespace-nowrap">
                             {r.apptDate ? (
                               <span className="font-semibold text-slate-800">
                                 {new Date(r.apptDate).toLocaleDateString()}
-                                {r.note && (
-                                  <span className="block text-[10px] text-slate-500 font-normal truncate max-w-[150px]">
-                                    {r.note}
-                                  </span>
-                                )}
                               </span>
                             ) : (
                               <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-[10px] font-bold">

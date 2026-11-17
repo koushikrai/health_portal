@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { SlotAssignmentModal } from '../components/slots/SlotAssignmentModal';
 
@@ -67,6 +67,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
   onSwitchRole
 }) => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   // Strict Role Guardrail: Medical Slot Portal is for HR, Requester, Central Medical Team & Admin
   if (!['CENTRAL', 'ADMIN', 'HR', 'REQUESTER'].includes(userRole)) {
@@ -122,6 +123,37 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
 
   // Selected request in queue (which card is active/expanded for clinic assignment)
   const [selectedReqId, setSelectedReqId] = useState<string | null>(null);
+
+  // List View Search, Status Filter & Accordion Dropdown State
+  const [listSearch, setListSearch] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'ALLOCATED'>('ALL');
+  const [expandedReqIds, setExpandedReqIds] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const slotParam = searchParams.get('slotId');
+    if (slotParam) {
+      setSelectedReqId(slotParam);
+      setExpandedReqIds(prev => ({ ...prev, [slotParam]: true }));
+    }
+  }, [searchParams]);
+
+  const toggleExpand = (reqId: string) => {
+    setSelectedReqId(reqId);
+    setExpandedReqIds(prev => ({
+      ...prev,
+      [reqId]: !prev[reqId]
+    }));
+  };
+
+  const expandAll = () => {
+    const all: Record<string, boolean> = {};
+    queue.forEach(q => { all[q.id] = true; });
+    setExpandedReqIds(all);
+  };
+
+  const collapseAll = () => {
+    setExpandedReqIds({});
+  };
 
   // Dynamic clinic rows per card: { [requestId]: AllocationRow[] }
   const [cardClinicRows, setCardClinicRows] = useState<Record<string, AllocationRow[]>>({});
@@ -235,6 +267,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
 
         if (fetchedQueue.length > 0 && !selectedReqId) {
           setSelectedReqId(fetchedQueue[0].id);
+          setExpandedReqIds(prev => (Object.keys(prev).length === 0 ? { [fetchedQueue[0].id]: true } : prev));
         }
       }
     } catch (e) {
@@ -475,9 +508,31 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
     document.body.removeChild(link);
   };
 
+  const pendingCount = queue.filter(req => getCardAllocatedSum(req.id) < req.requestedSlots).length;
+  const fullyAllocatedCount = queue.filter(req => getCardAllocatedSum(req.id) >= req.requestedSlots).length;
+
+  const filteredQueue = queue.filter(req => {
+    if (listSearch.trim()) {
+      const q = listSearch.toLowerCase();
+      const match =
+        req.id.toLowerCase().includes(q) ||
+        req.title.toLowerCase().includes(q) ||
+        req.department.toLowerCase().includes(q) ||
+        (req.plant && req.plant.toLowerCase().includes(q));
+      if (!match) return false;
+    }
+    if (statusFilter === 'PENDING') {
+      return getCardAllocatedSum(req.id) < req.requestedSlots;
+    }
+    if (statusFilter === 'ALLOCATED') {
+      return getCardAllocatedSum(req.id) >= req.requestedSlots;
+    }
+    return true;
+  });
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-5 bg-[#F3F5F7] min-h-screen">
-      {/* 1. Header with Title, Queue Counter & Action Buttons (Matching Page 2) */}
+      {/* 1. Header with Title, Queue Counter & Action Buttons */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-[22px] font-bold text-[#1B2430] tracking-tight">
@@ -485,11 +540,6 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
             {activeMenu === 'by-clinic' && 'Allocations by clinic'}
             {activeMenu === 'price-comparison' && 'Price comparison'}
           </h1>
-          <div className="text-xs text-[#5A6472] mt-0.5">
-            {activeMenu === 'queue' && 'Assign each slot request across clinics, starting with those expiring soon.'}
-            {activeMenu === 'by-clinic' && 'Pre-booked quota currently assigned to each approved clinic.'}
-            {activeMenu === 'price-comparison' && 'Compare agreed contract rates (SAR) across accredited partner clinics.'}
-          </div>
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
@@ -593,152 +643,331 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
       {/* TAB 1: ALLOCATION QUEUE */}
       {activeMenu === 'queue' && (
         <div className="space-y-4">
+          {/* List View Search & Status Filter Toolbar */}
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-3 sm:p-4 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+            {/* Search Box */}
+            <div className="relative flex-1 min-w-[240px]">
+              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">
+                search
+              </span>
+              <input
+                type="text"
+                placeholder="Filter batches by ID (e.g. SR-1021), test title, department, plant..."
+                value={listSearch}
+                onChange={(e) => setListSearch(e.target.value)}
+                className="w-full pl-9 pr-8 py-2 text-xs font-medium text-[#1B2430] bg-[#F8FAFC] border border-[#DDE3E9] rounded-lg focus:outline-none focus:border-secondary focus:bg-white transition-all placeholder:text-slate-400"
+              />
+              {listSearch && (
+                <button
+                  type="button"
+                  onClick={() => setListSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-[13px] font-bold cursor-pointer"
+                  title="Clear search"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Status Filter Tabs & Expand/Collapse All */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setStatusFilter('ALL')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  statusFilter === 'ALL'
+                    ? 'bg-[#0A0F1D] text-white shadow-xs'
+                    : 'bg-[#F8FAFC] text-[#5A6472] hover:bg-slate-100 border border-[#DDE3E9]'
+                }`}
+              >
+                All ({queue.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('PENDING')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  statusFilter === 'PENDING'
+                    ? 'bg-[#F79009] text-white shadow-xs'
+                    : 'bg-[#F8FAFC] text-[#5A6472] hover:bg-slate-100 border border-[#DDE3E9]'
+                }`}
+              >
+                Needs Allocation ({pendingCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('ALLOCATED')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  statusFilter === 'ALLOCATED'
+                    ? 'bg-[#12B76A] text-white shadow-xs'
+                    : 'bg-[#F8FAFC] text-[#5A6472] hover:bg-slate-100 border border-[#DDE3E9]'
+                }`}
+              >
+                Allocated ({fullyAllocatedCount})
+              </button>
+
+              <div className="h-5 w-px bg-slate-200 mx-1 hidden sm:block" />
+
+              <button
+                type="button"
+                onClick={expandAll}
+                className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                title="Expand all batch selection dropdowns"
+              >
+                Expand All
+              </button>
+              <button
+                type="button"
+                onClick={collapseAll}
+                className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                title="Collapse all batch selection dropdowns"
+              >
+                Collapse All
+              </button>
+            </div>
+          </div>
+
           {loading ? (
             <div className="p-12 text-center text-xs text-[#5A6472] font-semibold bg-white rounded-xl border border-[#DDE3E9]">
               Loading slot allocation requests from database...
             </div>
-          ) : queue.length === 0 ? (
+          ) : filteredQueue.length === 0 ? (
             <div className="p-12 text-center space-y-3 bg-white rounded-xl border border-[#DDE3E9]">
-              <div className="text-sm font-bold text-[#1B2430]">No Pending Slot Allocation Requests</div>
+              <div className="text-sm font-bold text-[#1B2430]">
+                {listSearch || statusFilter !== 'ALL'
+                  ? 'No Slot Allocation Requests Match Your Filter'
+                  : 'No Pending Slot Allocation Requests'}
+              </div>
               <p className="text-xs text-[#5A6472] max-w-sm mx-auto">
-                All pre-booked employee slots have been allocated across partner clinics.
+                {listSearch || statusFilter !== 'ALL'
+                  ? 'Try clearing the search or status filters to view all pre-booked batches.'
+                  : 'All pre-booked employee slots have been allocated across partner clinics.'}
               </p>
+              {(listSearch || statusFilter !== 'ALL') && (
+                <button
+                  type="button"
+                  onClick={() => { setListSearch(''); setStatusFilter('ALL'); }}
+                  className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-[#1B2430] rounded-lg transition-colors cursor-pointer"
+                >
+                  Clear Filters
+                </button>
+              )}
             </div>
           ) : (
-            queue.map((req) => {
-              const currentAllocated = getCardAllocatedSum(req.id);
-              const isFullyAllocated = currentAllocated === req.requestedSlots;
-              const isOverAllocated = currentAllocated > req.requestedSlots;
-              const currentRows = cardClinicRows[req.id] || [];
+            <div className="space-y-3">
+              {filteredQueue.map((req) => {
+                const currentAllocated = getCardAllocatedSum(req.id);
+                const isFullyAllocated = currentAllocated === req.requestedSlots;
+                const isOverAllocated = currentAllocated > req.requestedSlots;
+                const currentRows = cardClinicRows[req.id] || [];
+                const isExpanded = !!expandedReqIds[req.id];
 
-              return (
-                <div
-                  key={req.id}
-                  className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs space-y-4 transition-all"
-                >
-                  {/* Top Row: ID, Title, Dept Pill, requested / assigned summary */}
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <b className="text-[16px] text-[#1B2430] font-bold">{req.id}</b>
-                      <span className="text-[15px] font-semibold text-[#1B2430]">{req.title}</span>
-                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-[#5A6472] border border-[#DDE3E9]">
-                        {req.department}
-                      </span>
-                      {req.daysRemaining !== undefined && (
-                        <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-[#FDECD6] text-[#7A3A05]">
-                          Disappears in {req.daysRemaining}d
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-[#5A6472]">
-                      {req.requestedSlots} slots requested &bull; {req.assignedSlots || 0}/{req.requestedSlots} assigned &bull; Need-by {req.needByDate ? new Date(req.needByDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '20 Nov'}
-                    </div>
-                  </div>
+                return (
+                  <div
+                    key={req.id}
+                    className={`bg-white border rounded-xl shadow-2xs transition-all overflow-hidden ${
+                      isExpanded
+                        ? 'border-secondary/60 ring-2 ring-secondary/15 shadow-xs'
+                        : 'border-[#DDE3E9] hover:border-slate-300 hover:shadow-xs'
+                    }`}
+                  >
+                    {/* Batch List Item Header Row (Clickable to select and expand/collapse dropdown) */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => toggleExpand(req.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          toggleExpand(req.id);
+                        }
+                      }}
+                      className={`p-4 sm:px-5 sm:py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-3 cursor-pointer select-none transition-colors ${
+                        isExpanded ? 'bg-orange-50/25' : 'hover:bg-slate-50/80'
+                      }`}
+                    >
+                      {/* Left: Expand icon + Batch ID + Title + Department pill + Expiry */}
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <div
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all shrink-0 ${
+                            isExpanded ? 'bg-orange-100 text-secondary' : 'bg-slate-100 text-[#5A6472]'
+                          }`}
+                        >
+                          <span
+                            className={`material-symbols-outlined text-[18px] transition-transform duration-200 ${
+                              isExpanded ? 'rotate-180' : ''
+                            }`}
+                          >
+                            expand_more
+                          </span>
+                        </div>
 
-                  {/* Clinic Input Grid (Matching Page 2 prototype: .cl) */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 pt-1">
-                    {currentRows.map((row, colIndex) => {
-                      const clinicObj = allClinics.find(c => c.id === row.vendorId);
-                      return (
-                        <div key={colIndex} className="space-y-1">
-                          <label className="block text-xs font-semibold text-[#1B2430] truncate" title={clinicObj?.name}>
-                            {clinicObj?.name || `Clinic ${colIndex + 1}`}
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            max={req.requestedSlots}
-                            value={row.slots}
-                            onChange={(e) => handleUpdateRowSlots(req.id, colIndex, e.target.value)}
-                            className="w-full border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] font-bold text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary shadow-2xs"
-                          />
-                          <div className="flex items-center justify-between text-[10px] text-slate-400 px-1 pt-0.5">
-                            <button
-                              type="button"
-                              onClick={() => handleAssignAllToThisColumn(req.id, colIndex, req.requestedSlots)}
-                              className="hover:text-secondary font-semibold hover:underline cursor-pointer"
-                              title="Assign 100% of the requested slots to this clinic"
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[15px] font-bold text-[#1B2430] tracking-tight">{req.id}</span>
+                          <span className="text-[14px] font-semibold text-[#1B2430]">{req.title}</span>
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-[#5A6472] border border-[#DDE3E9]">
+                            {req.department}
+                          </span>
+                          {req.daysRemaining !== undefined && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[#FDECD6] text-[#7A3A05]">
+                              Disappears in {req.daysRemaining}d
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right: Slots summary + Selection Toggle Button */}
+                      <div className="flex items-center gap-3 flex-wrap justify-between md:justify-end">
+                        <div className="text-xs text-[#5A6472] font-medium">
+                          <span>{req.requestedSlots} slots requested</span>
+                          <span className="mx-1.5">&bull;</span>
+                          <span>{req.assignedSlots || 0}/{req.requestedSlots} assigned</span>
+                          <span className="mx-1.5">&bull;</span>
+                          <span>
+                            Need-by{' '}
+                            {req.needByDate
+                              ? new Date(req.needByDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+                              : '20 Nov'}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleExpand(req.id);
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                            isExpanded
+                              ? 'bg-secondary text-white shadow-2xs'
+                              : 'bg-white border border-[#DDE3E9] text-[#1B2430] hover:bg-slate-100'
+                          }`}
+                        >
+                          <span>{isExpanded ? 'Hide Allocation' : 'Select & Allocate'}</span>
+                          <span
+                            className={`material-symbols-outlined text-[15px] transition-transform duration-200 ${
+                              isExpanded ? 'rotate-180' : ''
+                            }`}
+                          >
+                            arrow_drop_down
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Dropdown Section: Clinic Allocation Inputs Grid (Matching Image 1) */}
+                    {isExpanded && (
+                      <div className="border-t border-[#EEF1F4] bg-[#FAFBFD] p-5 space-y-4 animate-in fade-in-50 duration-150">
+                        {/* Clinic Input Grid */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3 pt-1">
+                          {currentRows.map((row, colIndex) => {
+                            const clinicObj = allClinics.find((c) => c.id === row.vendorId);
+                            return (
+                              <div key={colIndex} className="space-y-1">
+                                <label
+                                  className="block text-xs font-semibold text-[#1B2430] truncate"
+                                  title={clinicObj?.name}
+                                >
+                                  {clinicObj?.name || `Clinic ${colIndex + 1}`}
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={req.requestedSlots}
+                                  value={row.slots}
+                                  onChange={(e) => handleUpdateRowSlots(req.id, colIndex, e.target.value)}
+                                  className="w-full border border-[#C5CED7] bg-white rounded-xl px-3 py-2 text-[13px] font-bold text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary shadow-2xs"
+                                />
+                                <div className="flex items-center justify-between text-[10px] text-slate-400 px-1 pt-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAssignAllToThisColumn(req.id, colIndex, req.requestedSlots)}
+                                    className="hover:text-secondary font-semibold hover:underline cursor-pointer"
+                                    title="Assign 100% of the requested slots to this clinic"
+                                  >
+                                    All {req.requestedSlots} here
+                                  </button>
+                                  {currentRows.length > 2 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveClinicRow(req.id, colIndex)}
+                                      className="hover:text-red-600 cursor-pointer"
+                                      title="Remove this clinic column"
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Bottom Action Bar: Status Pill + Actions (Matching Image 1) */}
+                        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#EEF1F4]">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
+                                isFullyAllocated
+                                  ? 'bg-[#D8F0E3] text-[#0B5132]'
+                                  : isOverAllocated
+                                  ? 'bg-[#FBE0DD] text-[#912018]'
+                                  : 'bg-[#FDECD6] text-[#7A3A05]'
+                              }`}
                             >
-                              All {req.requestedSlots} here
-                            </button>
-                            {currentRows.length > 2 && (
+                              {currentAllocated} of {req.requestedSlots} allocated
+                            </span>
+
+                            {isCentralOrAdmin && (
                               <button
                                 type="button"
-                                onClick={() => handleRemoveClinicRow(req.id, colIndex)}
-                                className="hover:text-red-600 cursor-pointer"
-                                title="Remove this clinic column"
+                                onClick={() => handleAddClinicRow(req.id)}
+                                className="text-xs font-semibold text-slate-500 hover:text-secondary flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
+                                title="Add another clinic column"
                               >
-                                Remove
+                                <span className="material-symbols-outlined text-[15px]">add</span>
+                                <span>Add Clinic</span>
                               </button>
                             )}
                           </div>
+
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => handleSplitEvenly(req)}
+                              className="px-4 py-2 bg-white border border-[#DDE3E9] hover:bg-slate-50 text-[#1B2430] rounded-xl text-xs font-semibold transition-all min-h-[40px] cursor-pointer shadow-2xs"
+                            >
+                              Split evenly
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                navigate(`/requests?mode=slots&slotId=${encodeURIComponent(req.id)}`)
+                              }
+                              className="px-3.5 py-2 bg-orange-50 hover:bg-orange-100 text-orange-800 border border-orange-200 rounded-xl text-xs font-bold transition-all min-h-[40px] cursor-pointer flex items-center gap-1.5"
+                              title="Open this booked slot in Request Queue to assign employees"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">group_add</span>
+                              <span>
+                                Assign in Request Queue ({req.assignedSlots || 0}/{req.requestedSlots}) &rarr;
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleConfirmAllocation(req)}
+                              className="px-4 py-2 bg-secondary hover:bg-secondary-hover text-white rounded-xl text-xs font-bold transition-all min-h-[40px] shadow-xs cursor-pointer"
+                            >
+                              Confirm allocation
+                            </button>
+                          </div>
                         </div>
-                      );
-                    })}
+                      </div>
+                    )}
                   </div>
-
-                  {/* Bottom Action Bar: Status Pill + Actions (Matching Page 2 prototype) */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#EEF1F4]">
-                    <div className="flex items-center gap-2">
-                      <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
-                        isFullyAllocated
-                          ? 'bg-[#D8F0E3] text-[#0B5132]'
-                          : isOverAllocated
-                          ? 'bg-[#FBE0DD] text-[#912018]'
-                          : 'bg-[#FDECD6] text-[#7A3A05]'
-                      }`}>
-                        {currentAllocated} of {req.requestedSlots} allocated
-                      </span>
-
-                      {isCentralOrAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => handleAddClinicRow(req.id)}
-                          className="text-xs font-semibold text-slate-500 hover:text-secondary flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
-                          title="Add another clinic column"
-                        >
-                          <span className="material-symbols-outlined text-[15px]">add</span>
-                          <span>Add Clinic</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleSplitEvenly(req)}
-                        className="px-4 py-2 bg-white border border-[#DDE3E9] hover:bg-slate-50 text-[#1B2430] rounded-lg text-xs font-semibold transition-all min-h-[40px] cursor-pointer shadow-2xs"
-                      >
-                        Split evenly
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/requests?mode=slots&slotId=${encodeURIComponent(req.id)}`)}
-                        className="px-3.5 py-2 bg-orange-50 hover:bg-orange-100 text-orange-800 border border-orange-200 rounded-lg text-xs font-bold transition-all min-h-[40px] cursor-pointer flex items-center gap-1.5"
-                        title="Open this booked slot in Request Queue to assign employees"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">group_add</span>
-                        <span>Assign in Request Queue ({req.assignedSlots || 0}/{req.requestedSlots}) &rarr;</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleConfirmAllocation(req)}
-                        className="px-4 py-2 bg-secondary hover:bg-secondary-hover text-white rounded-lg text-xs font-semibold transition-all min-h-[40px] shadow-xs cursor-pointer"
-                      >
-                        Confirm allocation
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Card Footer */}
-                  <div className="text-xs text-[#5A6472] pt-2 border-t border-[#EEF1F4]">
-                    Facility: {req.plant || 'Sadara Complex (Jubail)'} &bull; Requested by System Administrator {req.note && `&bull; Note: "${req.note}"`}
-                  </div>
-                </div>
-              );
-            })
+                );
+              })}
+            </div>
           )}
         </div>
       )}

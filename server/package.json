@@ -10,7 +10,12 @@
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
-    "seed": "tsx prisma/seed.ts"
+    "prisma:migrate": "prisma migrate deploy",
+    "seed": "tsx prisma/seed.ts",
+    "seed:masters": "tsx prisma/seed_masters.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed_masters.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
