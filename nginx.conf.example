@@ -1,0 +1,65 @@
+# Nginx Configuration for Expertise Medical Clearance Portal
+# Place this file in /etc/nginx/sites-available/health_portal
+# Then symlink to /etc/nginx/sites-enabled/ (Ubuntu/Debian) or include in conf.d (CentOS/AlmaLinux)
+
+# Upstream Node.js PM2 cluster on port 5000
+upstream backend_api {
+    server 127.0.0.1:5000;
+    keepalive 64;
+}
+
+server {
+    listen 80;
+    server_name yourdomain.com www.yourdomain.com; # Replace with your actual domain or VPS IP
+
+    # Allow large file uploads (for medical reports and Excel bulk imports)
+    client_max_body_size 25M;
+
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_proxied any;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript image/svg+xml;
+
+    # Path to Vite React build output
+    root /var/www/health_portal/client/dist;
+    index index.html;
+
+    # Static assets caching (Vite appends content hashes to assets)
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # API Reverse Proxy to PM2 Node.js backend
+    location /api/ {
+        proxy_pass http://backend_api;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        
+        # Timeouts for longer queries or bulk excel imports
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
+    }
+
+    # Health check endpoint
+    location /health {
+        proxy_pass http://backend_api/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
+    # Frontend Single Page Application (SPA) routing fallback
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

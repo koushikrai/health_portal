@@ -1,9 +1,13 @@
 {
   "name": "health-portal",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
-    "postinstall": "npm --prefix server install && npm --prefix server run build",
-    "build": "npm --prefix server install && npm --prefix server run build",
+    "build:client": "npm --prefix client run build",
+    "build:server": "npm --prefix server run build",
+    "build": "npm run build:client && npm run build:server",
+    "bundle:client": "powershell -Command \"Compress-Archive -Path client/dist/* -DestinationPath godaddy_frontend_upload.zip -Force\"",
+    "bundle:server": "powershell -Command \"Compress-Archive -Path server/dist, server/prisma, server/package.json, server/package-lock.json, server/app.js -DestinationPath godaddy_backend_upload.zip -Force\"",
     "start": "npm --prefix server start",
     "dev": "npm --prefix server run dev"
   },

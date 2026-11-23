@@ -42,25 +42,35 @@ app.use('/api/auth/login', authLimiter);
 // Limit standard JSON body size to 1MB (Multer handles multi-part PDF streams separately)
 app.use(express_1.default.json({ limit: '1mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '1mb' }));
-// Root endpoint
-app.get('/', (req, res) => {
-    res.json({
-        service: 'Expertise Medical Clearance Portal API',
-        status: 'online',
-        version: '1.0.0',
-        timestamp: new Date().toISOString(),
-        endpoints: {
-            health: '/health',
-            api: '/api'
-        }
-    });
-});
 // Health check
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', service: 'Expertise Medical Clearance Portal API', timestamp: new Date() });
 });
 // API Routes
 app.use('/api', routes_1.default);
+// Check if static frontend files exist in ../public (for unified deployment on GoDaddy / VPS)
+const publicDir = path_1.default.join(__dirname, '../public');
+if (fs_1.default.existsSync(publicDir)) {
+    app.use(express_1.default.static(publicDir));
+    app.get('*', (req, res) => {
+        res.sendFile(path_1.default.join(publicDir, 'index.html'));
+    });
+}
+else {
+    // Root endpoint fallback if running API-only
+    app.get('/', (req, res) => {
+        res.json({
+            service: 'Expertise Medical Clearance Portal API',
+            status: 'online',
+            version: '1.0.0',
+            timestamp: new Date().toISOString(),
+            endpoints: {
+                health: '/health',
+                api: '/api'
+            }
+        });
+    });
+}
 // Error handler
 app.use((err, req, res, next) => {
     console.error('Unhandled Server Error:', err);

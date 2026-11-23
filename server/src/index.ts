@@ -46,20 +46,6 @@ app.use('/api/auth/login', authLimiter);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-// Root endpoint
-app.get('/', (req, res) => {
-  res.json({
-    service: 'Expertise Medical Clearance Portal API',
-    status: 'online',
-    version: '1.0.0',
-    timestamp: new Date().toISOString(),
-    endpoints: {
-      health: '/health',
-      api: '/api'
-    }
-  });
-});
-
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'Expertise Medical Clearance Portal API', timestamp: new Date() });
@@ -67,6 +53,29 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api', routes);
+
+// Check if static frontend files exist in ../public (for unified deployment on GoDaddy / VPS)
+const publicDir = path.join(__dirname, '../public');
+if (fs.existsSync(publicDir)) {
+  app.use(express.static(publicDir));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(publicDir, 'index.html'));
+  });
+} else {
+  // Root endpoint fallback if running API-only
+  app.get('/', (req, res) => {
+    res.json({
+      service: 'Expertise Medical Clearance Portal API',
+      status: 'online',
+      version: '1.0.0',
+      timestamp: new Date().toISOString(),
+      endpoints: {
+        health: '/health',
+        api: '/api'
+      }
+    });
+  });
+}
 
 // Error handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
