@@ -1,41 +1,22 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.InvoicesController = void 0;
-const prisma_1 = __importDefault(require("../prisma"));
 const client_1 = require("@prisma/client");
 const invoiceService_1 = require("../services/invoiceService");
 const auditService_1 = require("../services/auditService");
+const invoiceRepository_1 = require("../repositories/invoiceRepository");
+const requestRepository_1 = require("../repositories/requestRepository");
+const masterRepository_1 = require("../repositories/masterRepository");
 class InvoicesController {
     static async list(req, res) {
         try {
             const { status, vendorId } = req.query;
-            const where = {};
-            if (status && status !== 'ALL') {
-                where.status = status;
-            }
-            // Vendor isolation: Clinics can only query their own invoices
-            if (req.user?.role === 'CLINIC' && req.user.vendorId) {
-                where.vendorId = req.user.vendorId;
-            }
-            else if (vendorId) {
-                where.vendorId = vendorId;
-            }
-            const invoices = await prisma_1.default.invoice.findMany({
-                where,
-                include: {
-                    vendor: true,
-                    lineItems: {
-                        include: {
-                            request: {
-                                include: { employee: true, test: true }
-                            }
-                        }
-                    }
-                },
-                orderBy: { invoiceDate: 'desc' }
+            const effectiveVendorId = req.user?.role === 'CLINIC'
+                ? (req.user.vendorId || '__NO_VENDOR__')
+                : vendorId;
+            const invoices = await invoiceRepository_1.InvoiceRepository.list({
+                status: status,
+                vendorId: effectiveVendorId
             });
             return res.json({ invoices });
         }
@@ -45,33 +26,26 @@ class InvoicesController {
     }
     static async submit(req, res) {
         try {
-            const { invoiceNo, vendorId, requestIds, fileUrl } = req.body;
+            const { invoiceNo: bodyInvoiceNo, invoiceNumber, vendorId, requestIds, fileUrl } = req.body;
+            const invoiceNo = bodyInvoiceNo || invoiceNumber;
             if (!invoiceNo || !vendorId || !Array.isArray(requestIds) || requestIds.length === 0) {
                 return res.status(400).json({ error: 'invoiceNo, vendorId, and requestIds array required' });
             }
-            // Guardrail: Clinics can only submit invoices for their own facility
-            const effectiveVendorId = (req.user?.role === 'CLINIC' && req.user.vendorId) ? req.user.vendorId : vendorId;
-            if (req.user?.role === 'CLINIC' && req.user.vendorId && vendorId !== req.user.vendorId) {
-                return res.status(403).json({ error: 'Forbidden: You can only submit invoices for your assigned medical center' });
+            // Facility vendor ID guardrail
+            let effectiveVendorId = vendorId;
+            if (req.user?.role === 'CLINIC') {
+                if (req.user.vendorId && vendorId && vendorId !== req.user.vendorId) {
+                    return res.status(403).json({ error: 'Forbidden: Cannot submit invoice for another clinic' });
+                }
+                effectiveVendorId = req.user.vendorId || vendorId;
             }
-            // Fetch completed requests
-            const requests = await prisma_1.default.medicalRequest.findMany({
-                where: {
-                    id: { in: requestIds },
-                    vendorId: effectiveVendorId,
-                    status: 'COMPLETED'
-                },
-                include: { test: true }
-            });
+            // Fetch completed requests via Data Tier
+            const requests = await requestRepository_1.RequestRepository.findBillableCompleted(requestIds, effectiveVendorId);
             if (requests.length === 0) {
                 return res.status(400).json({ error: 'No billable completed requests found' });
             }
-            // Fetch active contract rates
-            const contract = await prisma_1.default.contract.findFirst({
-                where: { vendorId: effectiveVendorId },
-                include: { rates: true },
-                orderBy: { createdAt: 'desc' }
-            });
+            // Fetch active contract rates via Data Tier
+            const contract = await masterRepository_1.MasterRepository.findLatestContractByVendor(effectiveVendorId);
             const rateMap = {};
             if (contract) {
                 for (const r of contract.rates)
@@ -89,24 +63,21 @@ class InvoicesController {
             });
             const vatAmount = Number((subtotal * 0.15).toFixed(2));
             const totalAmount = Number((subtotal + vatAmount).toFixed(2));
-            const invCount = await prisma_1.default.invoice.count();
+            const invCount = await invoiceRepository_1.InvoiceRepository.count();
             const invId = `INV-${String(invCount + 31).padStart(4, '0')}`;
-            const invoice = await prisma_1.default.invoice.create({
-                data: {
-                    id: invId,
-                    invoiceNo,
-                    vendorId: effectiveVendorId,
-                    invoiceDate: new Date(),
-                    subtotal,
-                    vatAmount,
-                    totalAmount,
-                    status: client_1.InvoiceStatus.SUBMITTED,
-                    fileUrl: fileUrl || `${invoiceNo}.pdf`,
-                    lineItems: {
-                        create: lineData
-                    }
-                },
-                include: { vendor: true, lineItems: true }
+            const invoice = await invoiceRepository_1.InvoiceRepository.create({
+                id: invId,
+                invoiceNo,
+                vendorId: effectiveVendorId,
+                invoiceDate: new Date(),
+                subtotal,
+                vatAmount,
+                totalAmount,
+                status: client_1.InvoiceStatus.SUBMITTED,
+                fileUrl: fileUrl || `${invoiceNo}.pdf`,
+                lineItems: {
+                    create: lineData
+                }
             });
             await auditService_1.AuditService.log({
                 userId: req.user?.id,
@@ -137,16 +108,12 @@ class InvoicesController {
         try {
             const { id } = req.params;
             const { sesReference, reviewNotes } = req.body;
-            const invoice = await prisma_1.default.invoice.update({
-                where: { id },
-                data: {
-                    status: client_1.InvoiceStatus.CLEARED,
-                    sesReference: sesReference || `SES-${Math.floor(10000 + Math.random() * 90000)}`,
-                    reviewNotes: reviewNotes || '3-Way Match Verified & Approved for Payment',
-                    reviewedAt: new Date(),
-                    reviewedById: req.user?.id
-                },
-                include: { vendor: true }
+            const invoice = await invoiceRepository_1.InvoiceRepository.update(id, {
+                status: client_1.InvoiceStatus.CLEARED,
+                sesReference: sesReference ? String(sesReference).trim() : `SES-${id.replace(/[^0-9]/g, '') || Date.now()}`,
+                reviewNotes: reviewNotes || '3-Way Match Verified & Approved for Payment',
+                reviewedAt: new Date(),
+                reviewedById: req.user?.id
             });
             await auditService_1.AuditService.log({
                 userId: req.user?.id,
@@ -167,15 +134,11 @@ class InvoicesController {
         try {
             const { id } = req.params;
             const { reason } = req.body;
-            const invoice = await prisma_1.default.invoice.update({
-                where: { id },
-                data: {
-                    status: client_1.InvoiceStatus.REJECTED,
-                    reviewNotes: reason || 'Price rate variance detected in 3-way match',
-                    reviewedAt: new Date(),
-                    reviewedById: req.user?.id
-                },
-                include: { vendor: true }
+            const invoice = await invoiceRepository_1.InvoiceRepository.update(id, {
+                status: client_1.InvoiceStatus.REJECTED,
+                reviewNotes: reason || 'Price rate variance detected in 3-way match',
+                reviewedAt: new Date(),
+                reviewedById: req.user?.id
             });
             await auditService_1.AuditService.log({
                 userId: req.user?.id,

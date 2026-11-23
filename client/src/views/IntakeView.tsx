@@ -1,9 +1,34 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { api } from '../api/client';
+import { PdfReportViewerModal } from '../components/certificate/PdfReportViewerModal';
+import { SlotAssignmentModal } from '../components/slots/SlotAssignmentModal';
 
 export const IntakeView: React.FC = () => {
-  const [mode, setMode] = useState<'single' | 'bulk'>('single');
+  const [mode, setMode] = useState<'single' | 'bulk' | 'batches' | 'prebook'>('single');
+
+  // Slot Assignment Modal State for Pre-Booked Quotas
+  const [assigningSlotId, setAssigningSlotId] = useState<string | null>(null);
+
+  // Bulk Upload Batches Tracking State
+  const [batches, setBatches] = useState<any[]>([]);
+  const [batchesLoading, setBatchesLoading] = useState(false);
+  const [customBatchName, setCustomBatchName] = useState('');
+  const [expandedBatchIds, setExpandedBatchIds] = useState<Set<string>>(new Set());
+  const [selectedPdfReport, setSelectedPdfReport] = useState<any>(null);
+
+  // Pre-Book Capacity Slots State (When employees are not decided yet - e.g. 50 slots)
+  const [preBookSlots, setPreBookSlots] = useState<number>(50);
+  const [preBookTestId, setPreBookTestId] = useState('5004955');
+  const [preBookTitle, setPreBookTitle] = useState('Sadara Medical');
+  const [preBookDept, setPreBookDept] = useState('PMTA');
+  const [preBookPlant, setPreBookPlant] = useState('Sadara Complex (Jubail)');
+  const [preBookNeedBy, setPreBookNeedBy] = useState('2026-11-20');
+  const [preBookNote, setPreBookNote] = useState('Advance capacity reservation for 50 unassigned workforce');
+  const [preBookList, setPreBookList] = useState<any[]>([]);
+  const [preBookLoading, setPreBookLoading] = useState(false);
+  const [preBookSubmitting, setPreBookSubmitting] = useState(false);
+  const [preBookSuccess, setPreBookSuccess] = useState('');
 
   // Single Request State
   const [searchQuery, setSearchQuery] = useState('');
@@ -35,8 +60,77 @@ export const IntakeView: React.FC = () => {
 
   useEffect(() => {
     loadTests();
-    handleSelectBySAP('11000016');
   }, []);
+
+  const loadPreBookReservations = async () => {
+    try {
+      setPreBookLoading(true);
+      const res = await api.getSlotQueue();
+      if (res.data?.requests) {
+        setPreBookList(res.data.requests);
+      }
+    } catch (e) {
+      console.error('Failed to load pre-book reservations:', e);
+    } finally {
+      setPreBookLoading(false);
+    }
+  };
+
+  const handlePreBookSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (preBookSlots <= 0) {
+      alert('Please enter a valid number of slots (e.g. 50)');
+      return;
+    }
+
+    try {
+      setPreBookSubmitting(true);
+      const matchedTest = tests.find(t => t.id === preBookTestId);
+      const res = await api.createSlotRequest({
+        title: matchedTest ? matchedTest.name : preBookTitle,
+        testId: preBookTestId,
+        department: preBookDept,
+        plant: preBookPlant,
+        requestedSlots: preBookSlots,
+        needByDate: preBookNeedBy || undefined,
+        note: preBookNote
+      });
+
+      setPreBookSuccess(`Successfully submitted pre-booked reservation ${res.data?.slotRequest?.id || 'new'} for ${preBookSlots} workers! Dispatched to Central Medical Team for clinic allocation.`);
+      loadPreBookReservations();
+      setTimeout(() => setPreBookSuccess(''), 9000);
+    } catch (e: any) {
+      alert(`Pre-booking failed: ${e.response?.data?.error || e.message}`);
+    } finally {
+      setPreBookSubmitting(false);
+    }
+  };
+
+  const loadBatches = async () => {
+    try {
+      setBatchesLoading(true);
+      const res = await api.getBatches();
+      if (res.data?.batches) {
+        setBatches(res.data.batches);
+      }
+    } catch (e) {
+      console.error('Failed to load batches:', e);
+    } finally {
+      setBatchesLoading(false);
+    }
+  };
+
+  const toggleBatchExpand = (batchId: string) => {
+    setExpandedBatchIds(prev => {
+      const next = new Set(prev);
+      if (next.has(batchId)) {
+        next.delete(batchId);
+      } else {
+        next.add(batchId);
+      }
+      return next;
+    });
+  };
 
   const loadTests = async () => {
     try {
@@ -44,6 +138,8 @@ export const IntakeView: React.FC = () => {
       setTests(res.data.tests);
       if (res.data.tests.length > 0) {
         setSelectedTestId(res.data.tests[0].id);
+        setPreBookTestId(res.data.tests[0].id);
+        setPreBookTitle(res.data.tests[0].name);
       }
     } catch (e) {
       console.error(e);
@@ -73,9 +169,9 @@ export const IntakeView: React.FC = () => {
 
   const handleSelectBySAP = async (sapId: string) => {
     try {
-      const res = await api.searchEmployees(sapId);
-      if (res.data.employees && res.data.employees.length > 0) {
-        handleSelectEmployee(res.data.employees[0]);
+      const res = await api.getEmployee(sapId);
+      if (res.data?.employee) {
+        handleSelectEmployee(res.data.employee);
       }
     } catch (e) {
       console.error(e);
@@ -364,17 +460,6 @@ export const IntakeView: React.FC = () => {
     await validateParsedRows(rowObjects);
   };
 
-  const handleLoadSampleBulk = () => {
-    const sample = `11000016\t5004955\t2026-11-20\tSadara Turnaround
-11000012\t5004959\t2026-11-15\tSABIC Gate Pass
-11000017\t5004964\t2026-11-25\tPetroKemya Site
-11000008\t5004959\t2026-11-10\tSulaiman Active`;
-    setBulkText(sample);
-    setUploadedFileName('Sample_ECC_Roster.xlsx');
-    setUploadedFileSize('4 sample records');
-    setUploadError('');
-  };
-
   const handleSubmitBulk = async () => {
     const validRows = bulkRows.filter(r => r.status === 'READY' || r.status === 'DUPLICATE_WARN');
     if (validRows.length === 0) {
@@ -406,320 +491,302 @@ export const IntakeView: React.FC = () => {
   const selectedTestObj = tests.find(t => t.id === selectedTestId);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Header with Single / Bulk Pill Switcher */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-slate-200 gap-3">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-5 bg-[#F3F5F7] min-h-screen">
+      {/* 1. Header with 'Reserve slots in advance' Button (Matching Page 1) */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-secondary"></span>
-            <span className="text-[11px] font-bold uppercase text-slate-500 tracking-wider">
-              Workforce Medical Clearance Intake
-            </span>
+          <h1 className="text-[22px] font-bold text-[#1B2430] tracking-tight">
+            Request medical tests
+          </h1>
+          <div className="text-xs text-[#5A6472] mt-0.5">
+            Add one employee, upload many, or reserve slots in advance
           </div>
-          <h2 className="font-display font-extrabold text-2xl text-slate-900 mt-0.5">
-            New Clearance Request
-          </h2>
-          <p className="text-xs text-slate-500">
-            Submit single employee gate pass clearance or batch-upload roster from Excel.
-          </p>
         </div>
 
-        {/* Mode Switcher Pill */}
-        <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
-          <button
-            type="button"
-            onClick={() => setMode('single')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              mode === 'single'
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            Single Request
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('bulk')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              mode === 'bulk'
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            Bulk Excel / CSV Upload
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setMode('prebook');
+            loadPreBookReservations();
+          }}
+          className="px-4 py-2 bg-secondary hover:bg-secondary-hover text-white rounded-lg text-[13px] font-semibold transition-all shadow-xs cursor-pointer min-h-[44px] shrink-0"
+        >
+          Reserve slots in advance
+        </button>
+      </div>
+
+      {/* 2. 4 Clean Mode Tabs */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setMode('single')}
+          className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all cursor-pointer min-h-[44px] ${
+            mode === 'single'
+              ? 'bg-[#0A0F1D] text-white shadow-xs'
+              : 'bg-white border border-[#DDE3E9] text-[#1B2430] hover:bg-slate-50'
+          }`}
+        >
+          Single employee
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('bulk')}
+          className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all cursor-pointer min-h-[44px] ${
+            mode === 'bulk'
+              ? 'bg-[#0A0F1D] text-white shadow-xs'
+              : 'bg-white border border-[#DDE3E9] text-[#1B2430] hover:bg-slate-50'
+          }`}
+        >
+          Bulk Excel / CSV
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setMode('prebook');
+            loadPreBookReservations();
+          }}
+          className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all cursor-pointer min-h-[44px] ${
+            mode === 'prebook'
+              ? 'bg-[#0A0F1D] text-white shadow-xs'
+              : 'bg-white border border-[#DDE3E9] text-[#1B2430] hover:bg-slate-50'
+          }`}
+        >
+          Reserve slots
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setMode('batches');
+            loadBatches();
+          }}
+          className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all cursor-pointer min-h-[44px] ${
+            mode === 'batches'
+              ? 'bg-[#0A0F1D] text-white shadow-xs'
+              : 'bg-white border border-[#DDE3E9] text-[#1B2430] hover:bg-slate-50'
+          }`}
+        >
+          Batches
+        </button>
       </div>
 
       {successMessage && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-between shadow-sm">
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-between shadow-2xs">
           <div className="flex items-center gap-3">
-            <span className="material-symbols-outlined text-emerald-600 text-[22px]">check_circle</span>
+            <span className="material-symbols-outlined text-emerald-600 text-[20px]">check_circle</span>
             <span className="font-semibold">{successMessage}</span>
           </div>
-          <span className="text-emerald-700 font-bold text-[11px]">Status: WAITING CENTRAL ASSIGNMENT</span>
+          <span className="text-emerald-700 font-bold text-[11px]">QUEUED FOR CLINIC ALLOCATION</span>
         </div>
       )}
 
       {bulkSuccess && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-between shadow-sm">
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-between shadow-2xs">
           <div className="flex items-center gap-3">
-            <span className="material-symbols-outlined text-emerald-600 text-[22px]">done_all</span>
+            <span className="material-symbols-outlined text-emerald-600 text-[20px]">done_all</span>
             <span className="font-semibold">{bulkSuccess}</span>
           </div>
           <span className="text-emerald-700 font-bold text-[11px]">DISPATCHED TO CENTRAL TEAM</span>
         </div>
       )}
 
-      {/* Mode 1: Single Request View */}
+      {/* Mode 1: Single Employee View (2-Column Grid Matching Client Screenshot) */}
       {mode === 'single' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left Column: Employee Civil & HR Record (5 cols) */}
-          <div className="lg:col-span-5 space-y-5">
-            <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-display font-bold text-base text-slate-900 flex items-center gap-2">
-                  <span className="material-symbols-outlined text-secondary text-[20px]">badge</span>
-                  <span>Employee Identification</span>
-                </h3>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => handleSelectBySAP('11000016')}
-                    className="text-[10.5px] px-2 py-0.5 rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 font-bold text-slate-600"
-                  >
-                    Dasan
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectBySAP('11000008')}
-                    className="text-[10.5px] px-2 py-0.5 rounded border border-amber-200 bg-amber-50 hover:bg-amber-100 font-bold text-amber-800"
-                    title="Triggers duplicate warning"
-                  >
-                    Sulaiman
-                  </button>
-                </div>
-              </div>
-
-              {/* Autocomplete Search Bar */}
-              <div className="relative mb-4">
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-                  Search by SAP ID or 10-Digit Saudi Iqama
-                </label>
-                <div className="relative">
-                  <span className="material-symbols-outlined absolute left-3 top-2.5 text-slate-400 text-[18px]">search</span>
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => handleSearch(e.target.value)}
-                    placeholder="e.g. 11000016 or 2239993609..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-secondary transition-all"
-                  />
-                </div>
-
-                {/* Autocomplete Dropdown List */}
-                {searchResults.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-30 max-h-56 overflow-y-auto divide-y divide-slate-100">
-                    {searchResults.map((emp) => (
-                      <button
-                        key={emp.id}
-                        type="button"
-                        onClick={() => handleSelectEmployee(emp)}
-                        className="w-full p-2.5 text-left hover:bg-slate-50 flex items-center justify-between text-xs cursor-pointer"
-                      >
-                        <div>
-                          <div className="font-bold text-slate-800">{emp.name}</div>
-                          <div className="text-[11px] text-slate-400 font-mono">
-                            SAP: {emp.employeeNo} &bull; Iqama: {emp.iqamaId || 'GCC Citizen'}
-                          </div>
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.3fr] gap-5 items-start">
+          {/* Card 1: 1. Employee */}
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+            <h2 className="text-[15px] font-semibold text-[#1B2430] mb-3.5">
+              1. Employee
+            </h2>
+            <label className="block text-xs font-semibold text-[#5A6472] mb-1.5" htmlFor="emp-search">
+              Search by SAP ID or 10-digit Iqama
+            </label>
+            <div className="relative">
+              <input
+                id="emp-search"
+                type="text"
+                value={searchQuery}
+                onChange={(e) => handleSearch(e.target.value)}
+                placeholder="e.g. 11000016 or 2239993609"
+                className="w-full border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary transition-all"
+              />
+              {searchResults.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-[#DDE3E9] rounded-xl shadow-xl z-30 max-h-56 overflow-y-auto divide-y divide-[#EEF1F4]">
+                  {searchResults.map((emp) => (
+                    <button
+                      key={emp.id}
+                      type="button"
+                      onClick={() => handleSelectEmployee(emp)}
+                      className="w-full p-2.5 text-left hover:bg-slate-50 flex items-center justify-between text-xs cursor-pointer"
+                    >
+                      <div>
+                        <div className="font-bold text-[#1B2430]">{emp.name}</div>
+                        <div className="text-[11px] text-[#5A6472] font-mono">
+                          SAP: {emp.employeeNo} &bull; Iqama: {emp.iqamaId || 'GCC Citizen'}
                         </div>
-                        <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">
-                          {emp.division}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Selected Employee Profile Summary */}
-              {selectedEmployee ? (
-                <div className="space-y-3 pt-2 border-t border-slate-100">
-                  <div className="flex items-center gap-3">
-                    <div className="h-11 w-11 rounded-xl bg-[#0A0F1D] text-secondary font-display font-extrabold text-base flex items-center justify-center shrink-0">
-                      {selectedEmployee.name ? selectedEmployee.name[0] : 'E'}
-                    </div>
-                    <div>
-                      <h4 className="font-display font-bold text-sm text-slate-900 leading-tight">
-                        {selectedEmployee.name}
-                      </h4>
-                      <p className="text-xs text-slate-500">{selectedEmployee.position}</p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                    <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
-                      <span className="text-[10px] text-slate-400 uppercase font-semibold block">SAP Badge</span>
-                      <span className="font-mono font-bold text-slate-800">{selectedEmployee.employeeNo}</span>
-                    </div>
-
-                    <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
-                      <span className="text-[10px] text-slate-400 uppercase font-semibold block">Saudi Iqama</span>
-                      <span className="font-mono font-bold text-slate-800">{selectedEmployee.iqamaId || '2239993609'}</span>
-                    </div>
-
-                    <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
-                      <span className="text-[10px] text-slate-400 uppercase font-semibold block">Division</span>
-                      <span className="font-medium text-slate-800 truncate block">{selectedEmployee.division}</span>
-                    </div>
-
-                    <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
-                      <span className="text-[10px] text-slate-400 uppercase font-semibold block">Cost Center</span>
-                      <span className="font-mono font-bold text-slate-800">{selectedEmployee.costCenter || '0010000402'}</span>
-                    </div>
-                  </div>
-
-                  <div className="p-2 rounded-xl bg-slate-50 border border-slate-100 text-xs flex items-center justify-between">
-                    <span className="text-slate-500">Nationality:</span>
-                    <span className="font-bold text-slate-800">{selectedEmployee.nationality || 'Saudi / Expat'} &bull; Active Status</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs">
-                  Select an employee to verify their civil credentials.
+                      </div>
+                      <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">
+                        {emp.division}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
-          </div>
 
-          {/* Right Column: Medical Clearance Request Form (7 cols) */}
-          <div className="lg:col-span-7 space-y-5">
-            <form onSubmit={handleSubmitSingle} className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm space-y-5">
-              <h3 className="font-display font-bold text-base text-slate-900 flex items-center gap-2">
-                <span className="material-symbols-outlined text-secondary text-[20px]">medical_services</span>
-                <span>Test Package & Eligibility Pre-Check</span>
-              </h3>
-
-              {/* Target Site & Need-By */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Target Site / Complex *
-                  </label>
-                  <select
-                    value={clientSite}
-                    onChange={(e) => setClientSite(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none focus:border-secondary"
-                  >
-                    <option value="Sadara Complex (Jubail)">Sadara Chemical Complex (Jubail)</option>
-                    <option value="SABIC Affiliates (Jubail/Yanbu)">SABIC Affiliates (Jubail / Yanbu)</option>
-                    <option value="Saudi Aramco (Ras Tanura/Berri)">Saudi Aramco (Ras Tanura / Berri)</option>
-                    <option value="PetroKemya Facilities">PetroKemya Petrochemical Plants</option>
-                    <option value="Royal Commission Jubail Projects">Royal Commission Industrial Projects</option>
-                  </select>
+            {/* Verification Box / Empty State */}
+            {!selectedEmployee ? (
+              <div className="mt-4 border-1.5 border-dashed border-[#C5CED7] rounded-xl p-8 text-center text-xs text-[#5A6472]">
+                Select an employee to verify their credentials
+              </div>
+            ) : (
+              <div className="mt-4 border border-[#EEF1F4] rounded-xl p-4 bg-slate-50/70 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-primary text-secondary font-display font-extrabold text-sm flex items-center justify-center shrink-0">
+                    {selectedEmployee.name ? selectedEmployee.name[0] : 'E'}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-[#1B2430] leading-tight">
+                      {selectedEmployee.name}
+                    </h4>
+                    <p className="text-xs text-[#5A6472]">{selectedEmployee.position || 'Operations Personnel'}</p>
+                  </div>
                 </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Need-By Date
-                  </label>
-                  <input
-                    type="date"
-                    value={needByDate}
-                    onChange={(e) => setNeedByDate(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none focus:border-secondary"
-                  />
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="p-2 rounded-lg bg-white border border-[#DDE3E9]">
+                    <span className="text-[10px] text-[#5A6472] uppercase font-semibold block">SAP Badge</span>
+                    <span className="font-mono font-bold text-[#1B2430]">{selectedEmployee.employeeNo}</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white border border-[#DDE3E9]">
+                    <span className="text-[10px] text-[#5A6472] uppercase font-semibold block">Saudi Iqama</span>
+                    <span className="font-mono font-bold text-[#1B2430]">{selectedEmployee.iqamaId || '—'}</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white border border-[#DDE3E9]">
+                    <span className="text-[10px] text-[#5A6472] uppercase font-semibold block">Division</span>
+                    <span className="font-medium text-[#1B2430] truncate block">{selectedEmployee.division || 'PMTA'}</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white border border-[#DDE3E9]">
+                    <span className="text-[10px] text-[#5A6472] uppercase font-semibold block">Cost Center</span>
+                    <span className="font-mono font-bold text-[#1B2430]">{selectedEmployee.costCenter || '1004'}</span>
+                  </div>
+                </div>
+                <div className="p-2 rounded-lg bg-white border border-[#DDE3E9] text-xs flex items-center justify-between">
+                  <span className="text-[#5A6472]">Nationality:</span>
+                  <span className="font-bold text-[#1B2430]">{selectedEmployee.nationality || 'Saudi / Expat'} &bull; Active Master</span>
                 </div>
               </div>
+            )}
+          </div>
 
-              {/* SAP Test Package */}
+          {/* Card 2: 2. Test details */}
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+            <h2 className="text-[15px] font-semibold text-[#1B2430] mb-3.5">
+              2. Test details
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr] gap-3">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  SAP Medical Test Package *
+                <label className="block text-xs font-semibold text-[#5A6472] mb-1.5" htmlFor="site-sel">
+                  Site / complex *
                 </label>
                 <select
-                  value={selectedTestId}
-                  onChange={(e) => handleTestChange(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary"
+                  id="site-sel"
+                  value={clientSite}
+                  onChange={(e) => setClientSite(e.target.value)}
+                  className="w-full border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary cursor-pointer shadow-2xs font-medium"
                 >
-                  {tests.map(t => (
-                    <option key={t.id} value={t.id}>
-                      {t.id} — {t.name} ({t.validityMonths > 0 ? `${t.validityMonths} Months Validity` : 'One-off/swab'})
-                    </option>
-                  ))}
+                  <option value="Sadara Chemical Complex (Jubail)">Sadara Chemical Complex (Jubail)</option>
+                  <option value="SABIC Affiliates (Jubail/Yanbu)">SABIC Affiliates (Jubail / Yanbu)</option>
+                  <option value="Saudi Aramco (Ras Tanura/Berri)">Saudi Aramco (Ras Tanura / Berri)</option>
+                  <option value="PetroKemya Facilities">PetroKemya Petrochemical Plants</option>
+                  <option value="Royal Commission Jubail Projects">Royal Commission Industrial Projects</option>
                 </select>
-                {selectedTestObj && (
-                  <div className="mt-1 text-[11px] text-slate-400 flex items-center justify-between">
-                    <span>SAP Material Code: <strong className="text-slate-600 font-mono">{selectedTestObj.id}</strong></span>
-                    <span>Accredited Clinics: <strong className="text-slate-600">{selectedTestObj.ratedClinics || 'BAK, GAMC'}</strong></span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#5A6472] mb-1.5" htmlFor="needby-dt">
+                  Need-by date
+                </label>
+                <input
+                  id="needby-dt"
+                  type="date"
+                  value={needByDate}
+                  onChange={(e) => setNeedByDate(e.target.value)}
+                  className="w-full border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary shadow-2xs font-medium"
+                />
+              </div>
+            </div>
+
+            {/* Medical test package */}
+            <div className="mt-4">
+              <label className="block text-xs font-semibold text-[#5A6472] mb-1.5" htmlFor="pkg-sel">
+                Medical test package *
+              </label>
+              <select
+                id="pkg-sel"
+                value={selectedTestId}
+                onChange={(e) => handleTestChange(e.target.value)}
+                className="w-full border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] font-semibold text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary cursor-pointer shadow-2xs"
+              >
+                {tests.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.id} &mdash; {t.name} ({t.validityMonths > 0 ? `${t.validityMonths} months validity` : '12 months validity'})
+                  </option>
+                ))}
+              </select>
+              <div className="mt-1.5 text-xs text-[#5A6472] flex items-center justify-between flex-wrap gap-2">
+                <span>SAP material code: <strong className="font-mono text-[#1B2430]">{selectedTestObj?.id || selectedTestId}</strong></span>
+                <span>Accredited clinics: <strong className="text-[#1B2430]">{selectedTestObj?.ratedClinics || 'BAK, GAMC'}</strong></span>
+              </div>
+            </div>
+
+            {/* Purpose and notes */}
+            <div className="mt-4">
+              <label className="block text-xs font-semibold text-[#5A6472] mb-1.5" htmlFor="purpose-nt">
+                Purpose and notes
+              </label>
+              <textarea
+                id="purpose-nt"
+                rows={3}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                className="w-full border border-[#C5CED7] bg-white rounded-lg p-3 text-[13px] text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary shadow-2xs"
+              />
+            </div>
+
+            {/* Automated Eligibility Banner */}
+            {eligibility && (
+              <div className="mt-4">
+                {eligibility.isEligible ? (
+                  <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px] text-emerald-600">verified</span>
+                    <span><strong>Eligible for Clearance:</strong> {eligibility.message}</span>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px] text-amber-600">warning</span>
+                    <span><strong>Duplicate Warning:</strong> {eligibility.message}</span>
                   </div>
                 )}
               </div>
+            )}
 
-              {/* Automated Eligibility Banner */}
-              {eligibility && (
-                <div>
-                  {eligibility.isEligible ? (
-                    <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2.5">
-                      <span className="material-symbols-outlined text-emerald-600 text-[18px] shrink-0 mt-0.5">verified</span>
-                      <div className="text-xs">
-                        <div className="font-bold text-emerald-900">Eligible for Clearance</div>
-                        <p className="text-emerald-700 mt-0.5">{eligibility.message}</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 flex items-start gap-2.5">
-                      <span className="material-symbols-outlined text-amber-600 text-[20px] shrink-0 mt-0.5">warning</span>
-                      <div className="text-xs">
-                        <div className="font-bold text-amber-900">Active Certificate Already on File (Duplicate Check)</div>
-                        <p className="text-amber-800 mt-0.5">{eligibility.message}</p>
-                        {eligibility.previousReport && (
-                          <div className="mt-1.5 text-[10.5px] font-mono text-amber-900 bg-amber-100/70 p-1.5 rounded border border-amber-200">
-                            Cert #{eligibility.previousReport.reportId} &bull; Valid Until: {eligibility.previousReport.validUntil.slice(0, 10)}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Notes */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Clearance Purpose & Notes
-                </label>
-                <textarea
-                  rows={2}
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="e.g. Turnaround gate pass clearance, new contractor deployment..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 focus:outline-none focus:border-secondary"
-                ></textarea>
-              </div>
-
-              {/* Submit Action */}
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-[11px] text-slate-400">
-                  Sends request to Central Team for hospital slot quota allocation
-                </span>
-
-                <button
-                  type="submit"
-                  disabled={submitting || !selectedEmployee}
-                  className="bg-secondary hover:bg-orange-600 text-white font-bold text-xs px-6 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  {submitting ? (
-                    <span>Submitting...</span>
-                  ) : (
-                    <>
-                      <span className="material-symbols-outlined text-[18px]">send</span>
-                      <span>Submit Clearance Request</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
+            {/* Footer Row */}
+            <div className="mt-5 pt-4 border-t border-[#EEF1F4] flex items-center justify-between flex-wrap gap-3">
+              <span className="text-xs text-[#5A6472]">
+                {!selectedEmployee ? 'Select an employee to enable submit' : 'Ready to submit for triage'}
+              </span>
+              <button
+                type="button"
+                disabled={submitting || !selectedEmployee}
+                onClick={handleSubmitSingle}
+                className={`px-5 py-2.5 rounded-lg text-[13px] font-semibold transition-all min-h-[44px] ${
+                  submitting || !selectedEmployee
+                    ? 'bg-[#E6EBF0] text-[#5A6472] cursor-not-allowed'
+                    : 'bg-secondary hover:bg-secondary-hover text-white shadow-xs cursor-pointer'
+                }`}
+              >
+                {submitting ? 'Submitting...' : 'Submit request'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -735,9 +802,6 @@ export const IntakeView: React.FC = () => {
                   <span className="material-symbols-outlined text-emerald-600 text-[22px]">table_chart</span>
                   <span>Bulk Request Intake (Excel Roster / CSV)</span>
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Upload an Excel spreadsheet (.xlsx, .xls) or paste roster rows. System validates SAP IDs, test codes, and certificate eligibility automatically.
-                </p>
               </div>
 
               {/* Action Buttons */}
@@ -755,19 +819,11 @@ export const IntakeView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+                  className="text-xs font-bold text-white bg-primary hover:bg-primary-light px-4 py-2 rounded-xl shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
                   title="Upload .xlsx or .xls file directly"
                 >
                   <span className="material-symbols-outlined text-[17px]">upload_file</span>
                   <span>Upload Excel Sheet</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleLoadSampleBulk}
-                  className="text-xs font-bold text-secondary bg-orange-50 hover:bg-orange-100 px-3 py-2 rounded-xl border border-orange-200 cursor-pointer"
-                >
-                  Load Sample Rows
                 </button>
               </div>
             </div>
@@ -797,6 +853,38 @@ export const IntakeView: React.FC = () => {
                 </button>
               </div>
             )}
+
+            {/* Custom Batch Title & Plant Selection */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                  Bulk Batch / Campaign Name (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={customBatchName}
+                  onChange={(e) => setCustomBatchName(e.target.value)}
+                  placeholder="e.g. Yanpet Turnaround Team Q4, Sadara Turnaround..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-secondary transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                  Industrial Facility / Site
+                </label>
+                <select
+                  value={clientSite}
+                  onChange={(e) => setClientSite(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-secondary transition-all"
+                >
+                  <option value="Yanpet Petrochemical (Yanbu)">Yanpet Petrochemical (Yanbu)</option>
+                  <option value="Sadara Complex (Jubail)">Sadara Complex (Jubail)</option>
+                  <option value="SABIC Jubail Site">SABIC Jubail Site</option>
+                  <option value="Aramco Ras Tanura">Aramco Ras Tanura</option>
+                  <option value="Main Complex Logistics">Main Complex Logistics</option>
+                </select>
+              </div>
+            </div>
 
             {/* Sub-Tabs: File Upload vs Clipboard Paste */}
             <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-2">
@@ -910,7 +998,7 @@ export const IntakeView: React.FC = () => {
                           e.stopPropagation();
                           fileInputRef.current?.click();
                         }}
-                        className="inline-flex items-center gap-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl shadow-sm transition-all cursor-pointer"
+                        className="inline-flex items-center gap-1.5 text-xs font-bold bg-primary hover:bg-primary-light text-white px-4 py-2 rounded-xl shadow-sm transition-all cursor-pointer"
                       >
                         <span className="material-symbols-outlined text-[17px]">folder_open</span>
                         <span>Browse Excel Files</span>
@@ -1057,6 +1145,448 @@ export const IntakeView: React.FC = () => {
             </div>
           )}
         </div>
+      )}
+
+      {/* Mode 3: HR Pre-Book Slots (Undecided Workforce Quota) */}
+      {mode === 'prebook' && (
+        <div className="space-y-6">
+          {preBookSuccess && (
+            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-between shadow-sm animate-in fade-in duration-200">
+              <div className="flex items-center gap-3">
+                <span className="material-symbols-outlined text-emerald-600 text-[22px]">check_circle</span>
+                <span className="font-semibold">{preBookSuccess}</span>
+              </div>
+              <span className="text-emerald-700 font-bold text-[11px]">SENT TO CENTRAL MEDICAL TEAM</span>
+            </div>
+          )}
+
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm space-y-5">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-emerald-700 text-[22px]">calendar_month</span>
+                <h3 className="font-display font-extrabold text-lg text-slate-900">
+                  Pre-Book Capacity Slots (When Employees Are Not Decided Yet)
+                </h3>
+              </div>
+            </div>
+
+            <form onSubmit={handlePreBookSubmit} className="space-y-4 pt-2 border-t border-slate-100">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 tracking-wider mb-1.5">
+                    Slots Needed (Headcount) *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="500"
+                    value={preBookSlots}
+                    onChange={(e) => setPreBookSlots(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-900 focus:outline-none focus:border-secondary focus:bg-white"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-1 block">e.g. 50 workers for upcoming turnaround</span>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 tracking-wider mb-1.5">
+                    Test Protocol / Medical Exam *
+                  </label>
+                  <select
+                    value={preBookTestId}
+                    onChange={(e) => {
+                      const tid = e.target.value;
+                      setPreBookTestId(tid);
+                      const found = tests.find(t => t.id === tid);
+                      if (found) setPreBookTitle(found.name);
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary focus:bg-white"
+                  >
+                    {tests.map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.id} — {t.name} ({t.validityMonths > 0 ? `${t.validityMonths} Months Validity` : 'One-off/swab'})
+                      </option>
+                    ))}
+                  </select>
+                  {tests.find(t => t.id === preBookTestId) && (
+                    <div className="mt-1 text-[11px] text-slate-400 flex items-center justify-between">
+                      <span>SAP Material Code: <strong className="text-slate-600 font-mono">{preBookTestId}</strong></span>
+                      <span>Accredited Clinics: <strong className="text-slate-600">{tests.find(t => t.id === preBookTestId)?.ratedClinics || 'BAK, GAMC'}</strong></span>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 tracking-wider mb-1.5">
+                    Department / Division *
+                  </label>
+                  <select
+                    value={preBookDept}
+                    onChange={(e) => setPreBookDept(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-800 focus:outline-none focus:border-secondary focus:bg-white"
+                  >
+                    <option value="PMTA">PMTA</option>
+                    <option value="CIVIL">CIVIL</option>
+                    <option value="MAINTENANCE">MAINTENANCE</option>
+                    <option value="LOGISTIC">LOGISTIC</option>
+                    <option value="E&I">E&amp;I</option>
+                    <option value="ISSD">ISSD</option>
+                    <option value="VSD">VSD</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 tracking-wider mb-1.5">
+                    Industrial Facility / Site
+                  </label>
+                  <input
+                    type="text"
+                    value={preBookPlant}
+                    onChange={(e) => setPreBookPlant(e.target.value)}
+                    placeholder="e.g. Sadara Complex (Jubail) or Yanpet Petrochemical"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-secondary focus:bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 tracking-wider mb-1.5">
+                    Target Need-By Date
+                  </label>
+                  <input
+                    type="date"
+                    value={preBookNeedBy}
+                    onChange={(e) => setPreBookNeedBy(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-secondary focus:bg-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-500 tracking-wider mb-1.5">
+                  Advance Justification / Notes for Central Medical Team
+                </label>
+                <textarea
+                  rows={2}
+                  value={preBookNote}
+                  onChange={(e) => setPreBookNote(e.target.value)}
+                  placeholder="e.g. Turnaround crew mobilization; final Iqama numbers will be provided once contractor gate pass list is confirmed."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 focus:outline-none focus:border-secondary focus:bg-white"
+                ></textarea>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-xs text-slate-400">
+                  Request will be routed to the <strong>Central Medical Team</strong> queue for clinic assignment.
+                </span>
+
+                <button
+                  type="submit"
+                  disabled={preBookSubmitting}
+                  className="bg-secondary hover:bg-secondary-hover text-white font-bold text-xs px-6 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-[16px]">send</span>
+                  <span>{preBookSubmitting ? 'Submitting Reservation...' : `Submit ${preBookSlots}-Slot Request to Central Team`}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Active Pre-Booked Reservations Tracker */}
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-display font-bold text-base text-slate-900">
+                  Active Pre-Booked Reservations &amp; Status ({preBookList.length})
+                </h4>
+              </div>
+
+              <button
+                type="button"
+                onClick={loadPreBookReservations}
+                disabled={preBookLoading}
+                className="p-1.5 text-slate-500 hover:text-slate-900 bg-slate-50 border border-slate-200 rounded-lg cursor-pointer"
+                title="Refresh Reservations"
+              >
+                <span className={`material-symbols-outlined text-[18px] ${preBookLoading ? 'animate-spin' : ''}`}>refresh</span>
+              </button>
+            </div>
+
+            {preBookLoading ? (
+              <div className="p-8 text-center text-xs text-slate-400">Loading reservations...</div>
+            ) : preBookList.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-400">No pre-booked reservations found.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-y border-slate-200 text-slate-500 uppercase text-[10px] font-semibold">
+                    <tr>
+                      <th className="py-2.5 px-3">Request ID</th>
+                      <th className="py-2.5 px-3">Protocol &amp; Dept</th>
+                      <th className="py-2.5 px-3">Facility</th>
+                      <th className="py-2.5 px-3">Slots Quota</th>
+                      <th className="py-2.5 px-3">Workforce Assigned</th>
+                      <th className="py-2.5 px-3">Central Team Status</th>
+                      <th className="py-2.5 px-3">Clinic Breakdown</th>
+                      <th className="py-2.5 px-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {preBookList.map((item) => {
+                      const totalAlloc = item.allocatedSlots || 0;
+                      const isFull = totalAlloc >= item.requestedSlots;
+                      const assigned = item.assignedSlots || 0;
+                      const remaining = item.remainingSlots ?? Math.max(0, item.requestedSlots - assigned);
+                      const percent = Math.min(100, Math.round((assigned / item.requestedSlots) * 100));
+
+                      return (
+                        <tr key={item.id} className="hover:bg-slate-50">
+                          <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{item.id}</td>
+                          <td className="py-2.5 px-3">
+                            <div className="font-bold text-slate-900">{item.title}</div>
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold">
+                              {item.department}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-600">{item.plant || 'Standard'}</td>
+                          <td className="py-2.5 px-3 font-mono font-extrabold text-slate-900">
+                            {item.requestedSlots} slots
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="w-36">
+                              <div className="flex items-center justify-between text-[11px] font-bold text-slate-800 mb-1">
+                                <span>{assigned} / {item.requestedSlots}</span>
+                                <span className={remaining === 0 ? 'text-emerald-700' : 'text-orange-600 font-semibold'}>
+                                  {remaining === 0 ? 'Full' : `${remaining} left`}
+                                </span>
+                              </div>
+                              <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full transition-all duration-300 rounded-full ${
+                                    remaining === 0 ? 'bg-emerald-600' : 'bg-orange-500'
+                                  }`}
+                                  style={{ width: `${percent}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            {isFull ? (
+                              <span className="inline-block px-2.5 py-1 rounded-md text-[11px] font-bold bg-[#DCFCE7] text-[#166534] border border-emerald-200">
+                                Confirmed &amp; Dispatched
+                              </span>
+                            ) : totalAlloc > 0 ? (
+                              <span className="inline-block px-2.5 py-1 rounded-md text-[11px] font-bold bg-[#FEF3C7] text-[#92400E] border border-amber-200">
+                                Partially Allocated ({totalAlloc}/{item.requestedSlots})
+                              </span>
+                            ) : (
+                              <span className="inline-block px-2.5 py-1 rounded-md text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                Awaiting Central Team
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            {item.activeAllocations && item.activeAllocations.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5">
+                                {item.activeAllocations.map((a: any, idx: number) => (
+                                  <span
+                                    key={idx}
+                                    className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 text-[10.5px] font-semibold"
+                                  >
+                                    {a.vendorName}: <strong className="text-emerald-800">{a.allocatedSlots}</strong>
+                                    {a.assignedSlots > 0 && (
+                                      <span className="text-[10px] text-orange-600 ml-1">({a.assignedSlots} assigned)</span>
+                                    )}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 italic text-[11px]">Pending Central clinic triage</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => setAssigningSlotId(item.id)}
+                              className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 ml-auto cursor-pointer"
+                              title="Assign employees (one by one or bulk) to this slot quota"
+                            >
+                              <span className="material-symbols-outlined text-[15px]">group_add</span>
+                              <span>Assign Employees</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Mode 4: Bulk Uploaded Batches Tracking */}
+      {mode === 'batches' && (
+        <div className="space-y-4">
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-display font-extrabold text-lg text-slate-900">
+                  Bulk Uploaded Employee Batches Tracking
+                </h3>
+              </div>
+
+              <button
+                type="button"
+                onClick={loadBatches}
+                disabled={batchesLoading}
+                className="p-1.5 text-slate-500 hover:text-slate-900 bg-slate-50 border border-slate-200 rounded-lg cursor-pointer"
+                title="Refresh Batches"
+              >
+                <span className={`material-symbols-outlined text-[18px] ${batchesLoading ? 'animate-spin' : ''}`}>refresh</span>
+              </button>
+            </div>
+
+            {batchesLoading ? (
+              <div className="p-8 text-center text-xs text-slate-400">Loading bulk batches...</div>
+            ) : batches.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-400">No bulk upload batches found.</div>
+            ) : (
+              <div className="space-y-3">
+                {batches.map((batch) => {
+                  const isExpanded = expandedBatchIds.has(batch.id);
+                  const progressPct = batch.totalEmployees > 0 ? Math.round((batch.doneCount / batch.totalEmployees) * 100) : 0;
+
+                  return (
+                    <div
+                      key={batch.id}
+                      className="border border-slate-200 rounded-2xl p-4 hover:border-slate-300 transition-all bg-white space-y-3"
+                    >
+                      <div
+                        onClick={() => toggleBatchExpand(batch.id)}
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-slate-900">{batch.id}</span>
+                            <span className="font-bold text-slate-800">&bull; {batch.title}</span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                              {batch.plant}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-400 flex items-center gap-3">
+                            <span>Protocol: <strong className="text-slate-600">{batch.protocolType}</strong></span>
+                            <span>Requested: <strong className="text-slate-600">{batch.requestedDate}</strong></span>
+                            <span>Total: <strong className="text-slate-800">{batch.totalEmployees} Workers</strong></span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <div className="text-xs font-bold text-slate-800">
+                              {batch.doneCount} of {batch.totalEmployees} Done ({progressPct}%)
+                            </div>
+                            <div className="w-32 bg-slate-100 h-2 rounded-full overflow-hidden mt-1">
+                              <div
+                                className="bg-emerald-600 h-full rounded-full transition-all"
+                                style={{ width: `${progressPct}%` }}
+                              ></div>
+                            </div>
+                          </div>
+
+                          <span className="material-symbols-outlined text-[20px] text-slate-400">
+                            {isExpanded ? 'expand_less' : 'expand_more'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Expanded Employees List */}
+                      {isExpanded && batch.employees && (
+                        <div className="pt-3 border-t border-slate-100 overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] font-semibold">
+                              <tr>
+                                <th className="py-2 px-3">SAP ID</th>
+                                <th className="py-2 px-3">Employee Name</th>
+                                <th className="py-2 px-3">Iqama</th>
+                                <th className="py-2 px-3">Department</th>
+                                <th className="py-2 px-3">Assigned Clinic</th>
+                                <th className="py-2 px-3">Card Status</th>
+                                <th className="py-2 px-3 text-right">Medical Report Action</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {batch.employees.map((emp: any) => (
+                                <tr key={emp.id} className="hover:bg-slate-50">
+                                  <td className="py-2 px-3 font-mono font-bold text-slate-800">{emp.empNo}</td>
+                                  <td className="py-2 px-3 font-semibold text-slate-900">{emp.name}</td>
+                                  <td className="py-2 px-3 font-mono text-slate-600">{emp.iqamaId || '-'}</td>
+                                  <td className="py-2 px-3 text-slate-600">{emp.dept}</td>
+                                  <td className="py-2 px-3 text-slate-700 font-medium">{emp.assignedClinicName || 'Unassigned'}</td>
+                                  <td className="py-2 px-3">
+                                    {emp.isCertified ? (
+                                      <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-emerald-100 text-emerald-800">
+                                        Certified Fit
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-amber-100 text-amber-800">
+                                        Pending Exam
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-2 px-3 text-right">
+                                    {emp.reportId || emp.pdfFileUrl ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedPdfReport({
+                                          id: emp.reportId,
+                                          employeeName: emp.name,
+                                          iqamaNumber: emp.iqamaId || emp.empNo,
+                                          reportName: `Medical Clearance - ${batch.protocolType}`,
+                                          issueDate: 'Active',
+                                          expiryDate: 'Valid',
+                                          medicalCenterName: emp.assignedClinicName || 'Accredited Medical Center',
+                                          pdfUrl: emp.pdfFileUrl || null
+                                        })}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10.5px] cursor-pointer"
+                                      >
+                                        <span className="material-symbols-outlined text-[13px]">picture_as_pdf</span>
+                                        <span>View Medical Report</span>
+                                      </button>
+                                    ) : (
+                                      <span className="text-[11px] text-slate-400 italic">Report Pending</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* PDF Report Viewer Modal */}
+      <PdfReportViewerModal
+        report={selectedPdfReport}
+        onClose={() => setSelectedPdfReport(null)}
+      />
+
+      {/* Pre-Booked Slot Workforce Assignment Modal */}
+      {assigningSlotId && (
+        <SlotAssignmentModal
+          slotId={assigningSlotId}
+          isOpen={!!assigningSlotId}
+          onClose={() => setAssigningSlotId(null)}
+          onAssignmentUpdated={loadPreBookReservations}
+        />
       )}
     </div>
   );

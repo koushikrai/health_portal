@@ -5,7 +5,7 @@ interface StatCardProps {
   value: string | number;
   trendText?: string;
   isPositiveTrend?: boolean;
-  icon: string;
+  icon?: string;
   iconBgColor?: string;
   iconColor?: string;
   ceilingPercent?: number;
@@ -25,12 +25,14 @@ export const StatCard: React.FC<StatCardProps> = ({
 }) => {
   return (
     <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
-      {/* Header with Label and Icon */}
+      {/* Header with Label and optional Icon */}
       <div className="flex items-center justify-between mb-2">
         <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{label}</span>
-        <div className={`h-8 w-8 rounded-xl ${iconBgColor} flex items-center justify-center shrink-0`}>
-          <span className={`material-symbols-outlined text-[18px] ${iconColor}`}>{icon}</span>
-        </div>
+        {icon && (
+          <div className={`h-8 w-8 rounded-xl ${iconBgColor} flex items-center justify-center shrink-0`}>
+            <span className={`material-symbols-outlined text-[18px] ${iconColor}`}>{icon}</span>
+          </div>
+        )}
       </div>
 
       {/* Main Metric Value */}

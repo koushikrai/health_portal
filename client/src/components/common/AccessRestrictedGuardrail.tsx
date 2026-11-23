@@ -23,10 +23,16 @@ const MODULE_REGISTRY: Record<string, ModuleInfo> = {
     authorizedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'FINANCE', 'ADMIN']
   },
   intake: {
-    name: 'Employee Medical Clearance Intake',
+    name: 'Employee Medical Clearance Intake & Pre-Booking',
     icon: 'add_circle',
-    description: 'Single employee eligibility check, Iqama validation, and bulk Excel/CSV onboarding upload.',
-    authorizedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'ADMIN']
+    description: 'Single employee eligibility check, Iqama validation, bulk roster upload, and advance 50-slot pre-booking for undecided staff.',
+    authorizedRoles: ['HR', 'REQUESTER', 'ADMIN']
+  },
+  slots: {
+    name: 'Medical Slot Portal & Allocation Queue',
+    icon: 'calendar_month',
+    description: 'Central Medical Team capacity management: dispatching pre-booked slots across accredited clinics, split allocations, and tariff comparisons.',
+    authorizedRoles: ['CENTRAL', 'ADMIN']
   },
   requests: {
     name: 'Clearance Requests & Central Triage Queue',
@@ -38,7 +44,7 @@ const MODULE_REGISTRY: Record<string, ModuleInfo> = {
     name: 'Medical Fitness Certificate Library',
     icon: 'folder_shared',
     description: 'Archival repository of certified FIT/UNFIT determinations and printable bilingual certificates.',
-    authorizedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'CLINIC', 'FINANCE', 'ADMIN']
+    authorizedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'ADMIN']
   },
   clinic: {
     name: 'Accredited Medical Center Portal',
@@ -56,13 +62,13 @@ const MODULE_REGISTRY: Record<string, ModuleInfo> = {
     name: 'Accredited Clinics & Rate Cards',
     icon: 'domain',
     description: 'Contract terms, approved test price masters, and accredited medical facility profiles.',
-    authorizedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'CLINIC', 'FINANCE', 'ADMIN']
+    authorizedRoles: ['CENTRAL', 'FINANCE', 'ADMIN']
   },
   audit: {
     name: 'System Security & Audit Trail',
     icon: 'history',
     description: 'Immutable regulatory log of clearance creations, clinic assignments, medical results, and financial clearances.',
-    authorizedRoles: ['HR', 'CENTRAL', 'FINANCE', 'ADMIN']
+    authorizedRoles: ['ADMIN']
   },
   admin: {
     name: 'Master System Administration Console',
@@ -84,10 +90,10 @@ const ROLE_DISPLAY_NAMES: Record<string, string> = {
 const ROLE_DEFAULT_TABS: Record<string, string> = {
   HR: 'dashboard',
   REQUESTER: 'intake',
-  CENTRAL: 'requests',
+  CENTRAL: 'slots',
   CLINIC: 'clinic',
   FINANCE: 'finance',
-  ADMIN: 'dashboard'
+  ADMIN: 'admin'
 };
 
 export const AccessRestrictedGuardrail: React.FC<AccessRestrictedGuardrailProps> = ({

@@ -4,13 +4,27 @@
 
 :root {
   color-scheme: light;
+  --color-primary: #1A1F45;
+  --color-primary-dark: #0A0F1D;
+  --color-primary-light: #2C356E;
+  --color-primary-container: #131B35;
+  --color-on-primary-container: #FFFFFF;
+  --color-secondary: #E97F29;
+  --color-secondary-hover: #D46F1E;
+  --color-secondary-container: #FFF3EA;
+  --color-on-secondary-container: #9A4603;
+  --color-tertiary: #0284C7;
+  --color-tertiary-container: #E0F2FE;
+  --color-on-tertiary-container: #0369A1;
+  --color-surface-canvas: #F8FAFC;
 }
 
 body {
   margin: 0;
-  background-color: #F8FAFC;
+  background-color: var(--color-surface-canvas, #F8FAFC);
   color: #0F172A;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  transition: background-color 0.2s ease;
 }
 
 /* Material symbols styling */

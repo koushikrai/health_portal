@@ -101,7 +101,7 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({ certificate,
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px] uppercase font-semibold">Iqama / Muqeem ID</span>
-                <span className="font-mono font-bold text-slate-900 text-sm">{certificate.iqamaId || '2117017034'}</span>
+                <span className="font-mono font-bold text-slate-900 text-sm">{certificate.iqamaId || certificate.employeeNo || '—'}</span>
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px] uppercase font-semibold">SAP Employee No.</span>

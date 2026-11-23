@@ -33,6 +33,9 @@ apiClient.interceptors.response.use(
 );
 
 export const api = {
+  // System Telemetry & Health
+  getHealth: () => apiClient.get('/health'),
+
   // Auth
   login: (data: { username: string; password: string }) => apiClient.post('/auth/login', data),
   me: () => apiClient.get('/auth/me'),
@@ -42,7 +45,12 @@ export const api = {
   getMetrics: () => apiClient.get('/dashboard/metrics'),
 
   // Employees
-  searchEmployees: (q: string) => apiClient.get(`/employees/search?q=${encodeURIComponent(q)}`),
+  searchEmployees: (q: string = '', limit?: number, offset?: number) => {
+    let url = `/employees/search?q=${encodeURIComponent(q)}`;
+    if (limit) url += `&limit=${limit}`;
+    if (offset) url += `&offset=${offset}`;
+    return apiClient.get(url);
+  },
   getEmployee: (id: string) => apiClient.get(`/employees/${id}`),
   checkEligibility: (id: string, testId: string) => apiClient.get(`/employees/${id}/eligibility?testId=${testId}`),
 
@@ -54,17 +62,28 @@ export const api = {
 
   // Requests
   getRequests: (params?: { status?: string; vendorId?: string; search?: string }) => apiClient.get('/requests', { params }),
+  getBatches: () => apiClient.get('/requests/batches'),
   createRequest: (data: any) => apiClient.post('/requests', data),
-  bulkCreateRequests: (requests: any[]) => apiClient.post('/requests/bulk', { requests }),
-  batchAssignRequests: (requestIds: string[], vendorId: string) => apiClient.patch('/requests/batch-assign', { requestIds, vendorId }),
-  scheduleAppointment: (id: string, apptDate: string) => apiClient.patch(`/requests/${id}/schedule`, { apptDate }),
+  bulkCreateRequests: (payload: any) => {
+    const data = Array.isArray(payload) ? { requests: payload } : payload;
+    return apiClient.post('/requests/bulk', data);
+  },
+  batchAssignRequests: (requestIds: string[], vendorId: string, apptDate?: string) => apiClient.patch('/requests/batch-assign', { requestIds, vendorId, apptDate }),
+  scheduleAppointment: (id: string, apptDate: string, note?: string) => apiClient.patch(`/requests/${id}/schedule`, { apptDate, note }),
+  updateRequest: (id: string, data: any) => apiClient.patch(`/requests/${id}`, data),
   cancelRequest: (id: string) => apiClient.patch(`/requests/${id}/cancel`),
   rejectRequest: (id: string, reason?: string) => apiClient.patch(`/requests/${id}/reject`, { reason }),
 
-  // Reports
+  // Reports & Workforce Clearance
   getReports: (params?: { result?: string; search?: string }) => apiClient.get('/reports', { params }),
+  getWorkforceClearance: (params?: { search?: string; department?: string; status?: string; batchId?: string }) =>
+    apiClient.get('/clearance/workforce', { params }),
   submitReportResult: (data: any) => apiClient.post('/reports', data),
   getCertificate: (id: string) => apiClient.get(`/reports/${id}/certificate`),
+  getReportPdfBlob: (id: string) => apiClient.get(`/reports/${id}/file`, { responseType: 'blob' }),
+  uploadBatchReports: (formData: FormData) => apiClient.post('/reports/bulk-upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
 
   // Invoices
   getInvoices: (params?: { status?: string; vendorId?: string }) => apiClient.get('/invoices', { params }),
@@ -76,6 +95,42 @@ export const api = {
   // Audit Logs
   getAuditLogs: () => apiClient.get('/audit-logs'),
 
+  // Medical Slot Portal & Advance Pre-Booking
+  getSlotQueue: (params?: { includeExpired?: boolean }) => apiClient.get('/slots/queue', { params }),
+  createSlotRequest: (data: {
+    title?: string;
+    testId?: string;
+    department?: string;
+    plant?: string;
+    requestedSlots: number;
+    needByDate?: string;
+    note?: string;
+  }) => apiClient.post('/slots/request', data),
+  allocateSlots: (id: string, data: { allocations: Record<string, number>; status?: string }) =>
+    apiClient.post(`/slots/${id}/allocate`, data),
+  getSlotsByClinic: () => apiClient.get('/slots/by-clinic'),
+  getSlotsPriceComparison: () => apiClient.get('/slots/price-comparison'),
+
+  // Slot Assignments (Single & Bulk Employee Allocation for HR)
+  getSlotAssignments: (slotId: string) => apiClient.get(`/slots/${slotId}/assignments`),
+  assignSingleToSlot: (slotId: string, data: {
+    employeeNo?: string;
+    employeeId?: string;
+    name?: string;
+    department?: string;
+    vendorId?: string;
+    apptDate?: string;
+    note?: string;
+  }) => apiClient.post(`/slots/${slotId}/assign-single`, data),
+  assignBulkToSlot: (slotId: string, data: {
+    employees: Array<{ employeeNo?: string; id?: string; name?: string; department?: string }>;
+    vendorId?: string;
+    apptDate?: string;
+    note?: string;
+  }) => apiClient.post(`/slots/${slotId}/assign-bulk`, data),
+  unassignFromSlot: (slotId: string, requestId: string) =>
+    apiClient.delete(`/slots/${slotId}/assignments/${requestId}`),
+
   // Master Administration & Governance
   admin: {
     getOverview: () => apiClient.get('/admin/overview'),
@@ -85,8 +140,13 @@ export const api = {
     deleteUser: (id: string) => apiClient.delete(`/admin/users/${id}`),
     createClinic: (data: any) => apiClient.post('/admin/clinics', data),
     updateClinic: (id: string, data: any) => apiClient.patch(`/admin/clinics/${id}`, data),
+    deleteClinic: (id: string) => apiClient.delete(`/admin/clinics/${id}`),
     createContract: (data: any) => apiClient.post('/admin/contracts', data),
     addContractRate: (data: any) => apiClient.post('/admin/rates', data),
-    deleteContractRate: (id: string) => apiClient.delete(`/admin/rates/${id}`)
+    deleteContractRate: (id: string) => apiClient.delete(`/admin/rates/${id}`),
+    getSettings: () => apiClient.get('/admin/settings'),
+    updateSettings: (data: any) => apiClient.patch('/admin/settings', data),
+    expireSlot: (id: string) => apiClient.post(`/admin/slots/${id}/expire`),
+    restoreSlot: (id: string) => apiClient.post(`/admin/slots/${id}/restore`)
   }
 };

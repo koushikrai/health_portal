@@ -1,30 +1,12 @@
 import { Role } from '@prisma/client';
-import prisma from '../prisma';
+import { AuditRepository, AuditLogData } from '../repositories/auditRepository';
 
 export class AuditService {
-  static async log(params: {
-    userId?: string;
-    actorName: string;
-    role: Role;
-    action: string;
-    entityType: string;
-    entityId?: string;
-    details: string;
-  }) {
+  static async log(params: AuditLogData) {
     try {
-      return await prisma.auditLog.create({
-        data: {
-          userId: params.userId,
-          actorName: params.actorName,
-          role: params.role,
-          action: params.action,
-          entityType: params.entityType,
-          entityId: params.entityId,
-          details: params.details
-        }
-      });
+      return await AuditRepository.create(params);
     } catch (e) {
-      console.error('AuditLog failed:', e);
+      console.error('[AuditService Error]:', e);
     }
   }
 }

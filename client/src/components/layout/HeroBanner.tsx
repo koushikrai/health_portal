@@ -18,11 +18,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
   title,
   accentText,
   subtitle,
-  telemetryChips = [
-    { icon: 'settings_input_component', text: '4 Terminals Connected' },
-    { icon: 'schedule', text: 'Shift 1 Active (07:00 - 15:30)' },
-    { icon: 'verified', text: 'Biometric Terminal Sync: 99.8%', highlight: true }
-  ],
+  telemetryChips,
   timePeriod = 'This Week',
   onTimePeriodChange,
   actionButton
@@ -45,28 +41,30 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
           </h1>
 
           {/* Subtitle */}
-          <p className="text-xs lg:text-sm text-slate-300 max-w-2xl leading-relaxed mb-4">
+          <p className="text-xs lg:text-sm text-slate-300 max-w-2xl leading-relaxed mb-1">
             {subtitle}
           </p>
 
-          {/* Telemetry Micro-Pills */}
-          <div className="flex flex-wrap items-center gap-2">
-            {telemetryChips.map((chip, idx) => (
-              <div
-                key={idx}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border ${
-                  chip.highlight
-                    ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
-                    : 'bg-slate-900/70 border-slate-700/60 text-slate-300'
-                }`}
-              >
-                <span className={`material-symbols-outlined text-[14px] ${chip.highlight ? 'text-emerald-400' : 'text-secondary'}`}>
-                  {chip.icon}
-                </span>
-                <span>{chip.text}</span>
-              </div>
-            ))}
-          </div>
+          {/* Optional Telemetry Micro-Pills */}
+          {telemetryChips && telemetryChips.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 mt-4">
+              {telemetryChips.map((chip, idx) => (
+                <div
+                  key={idx}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border ${
+                    chip.highlight
+                      ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
+                      : 'bg-slate-900/70 border-slate-700/60 text-slate-300'
+                  }`}
+                >
+                  <span className={`material-symbols-outlined text-[14px] ${chip.highlight ? 'text-emerald-400' : 'text-secondary'}`}>
+                    {chip.icon}
+                  </span>
+                  <span>{chip.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Right Action Controls */}

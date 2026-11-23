@@ -18,10 +18,31 @@ export const AuditLogView: React.FC = () => {
     }
   };
 
+  const formatTargetEntity = (l: any) => {
+    if (l.entityType === 'User') {
+      if (l.targetName) {
+        return `User: ${l.targetName}`;
+      }
+      // Fallback extraction from event details
+      const impersonateMatch = l.details?.match(/impersonating ([^)]+)/);
+      if (impersonateMatch) {
+        return `User: ${impersonateMatch[1]}`;
+      }
+      const signedInMatch = l.details?.match(/User ([^\s]+) signed in/);
+      if (signedInMatch) {
+        return `User: ${signedInMatch[1]}`;
+      }
+      return l.actorName ? `User: ${l.actorName}` : (l.entityId ? `User #${l.entityId.slice(0, 8)}` : 'User');
+    }
+
+    return `${l.entityType} ${l.entityId ? `#${l.entityId}` : ''}`.trim();
+  };
+
   const filteredLogs = logs.filter(l =>
     l.actorName.toLowerCase().includes(search.toLowerCase()) ||
     l.action.toLowerCase().includes(search.toLowerCase()) ||
     l.details.toLowerCase().includes(search.toLowerCase()) ||
+    (l.targetName && l.targetName.toLowerCase().includes(search.toLowerCase())) ||
     (l.entityId && l.entityId.toLowerCase().includes(search.toLowerCase()))
   );
 
@@ -32,7 +53,6 @@ export const AuditLogView: React.FC = () => {
           <span className="material-symbols-outlined text-secondary text-2xl">history</span>
           <div>
             <h2 className="font-display font-extrabold text-xl text-slate-900">System Audit Trail & Compliance Ledger</h2>
-            <p className="text-xs text-slate-400">Immutable chronological record of all medical clearances, clinic allocations, exam outcomes, and finance approvals</p>
           </div>
         </div>
       </div>
@@ -80,8 +100,8 @@ export const AuditLogView: React.FC = () => {
                     </span>
                   </td>
                   <td className="py-3.5 px-4 font-mono font-bold text-secondary text-[11px]">{l.action}</td>
-                  <td className="py-3.5 px-4 font-mono text-[11px] text-slate-600">
-                    {l.entityType} {l.entityId ? `#${l.entityId}` : ''}
+                  <td className="py-3.5 px-4 font-mono text-[11px] text-slate-700">
+                    {formatTargetEntity(l)}
                   </td>
                   <td className="py-3.5 px-4 text-slate-700">{l.details}</td>
                 </tr>

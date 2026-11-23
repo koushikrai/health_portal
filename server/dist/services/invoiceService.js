@@ -1,38 +1,16 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.InvoiceService = void 0;
-const prisma_1 = __importDefault(require("../prisma"));
+const invoiceRepository_1 = require("../repositories/invoiceRepository");
+const masterRepository_1 = require("../repositories/masterRepository");
 class InvoiceService {
     static async auditInvoice(invoiceId) {
-        const invoice = await prisma_1.default.invoice.findUnique({
-            where: { id: invoiceId },
-            include: {
-                vendor: true,
-                lineItems: {
-                    include: {
-                        request: {
-                            include: {
-                                employee: true,
-                                test: true,
-                                report: true
-                            }
-                        }
-                    }
-                }
-            }
-        });
+        const invoice = await invoiceRepository_1.InvoiceRepository.findById(invoiceId);
         if (!invoice) {
             throw new Error(`Invoice not found: ${invoiceId}`);
         }
-        // Fetch active contract rates for this clinic
-        const contract = await prisma_1.default.contract.findFirst({
-            where: { vendorId: invoice.vendorId },
-            include: { rates: true },
-            orderBy: { createdAt: 'desc' }
-        });
+        // Fetch active contract rates for this clinic via Data Tier
+        const contract = await masterRepository_1.MasterRepository.findLatestContractByVendor(invoice.vendorId);
         const rateMap = {};
         if (contract) {
             for (const r of contract.rates) {

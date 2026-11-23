@@ -6,8 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.requireRole = exports.authenticate = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const client_1 = require("@prisma/client");
-const prisma_1 = __importDefault(require("../prisma"));
-const JWT_SECRET = process.env.JWT_SECRET || 'ecc-health-clearance-secret-2026';
+const config_1 = require("../config");
+const userRepository_1 = require("../repositories/userRepository");
 const authenticate = async (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
@@ -16,12 +16,9 @@ const authenticate = async (req, res, next) => {
             return;
         }
         const token = authHeader.split(' ')[1];
-        const decoded = jsonwebtoken_1.default.verify(token, JWT_SECRET);
-        // Verify user exists and is active in database
-        const user = await prisma_1.default.user.findUnique({
-            where: { id: decoded.id },
-            include: { vendor: true }
-        });
+        const decoded = jsonwebtoken_1.default.verify(token, config_1.config.jwtSecret);
+        // Verify user exists and is active in database via Data Tier repository
+        const user = await userRepository_1.UserRepository.findById(decoded.id);
         if (!user || !user.isActive) {
             res.status(401).json({ error: 'Unauthorized: User account not found or inactive' });
             return;
@@ -31,7 +28,8 @@ const authenticate = async (req, res, next) => {
             username: user.username,
             name: user.name,
             role: user.role,
-            vendorId: user.vendorId
+            vendorId: user.vendorId,
+            impersonatorId: decoded.impersonatorId || undefined
         };
         next();
     }
@@ -46,6 +44,7 @@ const requireRole = (allowedRoles) => {
             res.status(401).json({ error: 'Unauthorized: Authentication required' });
             return;
         }
+        // Role check: ADMIN role or user possessing explicit role in allowed list
         if (req.user.role === client_1.Role.ADMIN || allowedRoles.includes(req.user.role)) {
             return next();
         }

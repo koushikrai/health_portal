@@ -6,9 +6,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthController = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-const prisma_1 = __importDefault(require("../prisma"));
+const client_1 = require("@prisma/client");
 const auditService_1 = require("../services/auditService");
-const JWT_SECRET = process.env.JWT_SECRET || 'ecc-health-clearance-secret-2026';
+const config_1 = require("../config");
+const userRepository_1 = require("../repositories/userRepository");
 class AuthController {
     static async login(req, res) {
         try {
@@ -16,17 +17,11 @@ class AuthController {
             if (!username || !password) {
                 return res.status(400).json({ error: 'Username and password required' });
             }
-            const user = await prisma_1.default.user.findUnique({
-                where: { username: username.toLowerCase() },
-                include: { vendor: true }
-            });
+            const user = await userRepository_1.UserRepository.findByUsername(username);
             if (!user || !user.isActive) {
                 return res.status(401).json({ error: 'Invalid credentials or inactive account' });
             }
-            let isMatch = await bcryptjs_1.default.compare(password, user.passwordHash);
-            if (!isMatch && (password === 'password123' || password === 'Exp@2026' || password === 'admin123' || password === 'Admin@2026')) {
-                isMatch = true;
-            }
+            const isMatch = await bcryptjs_1.default.compare(password, user.passwordHash);
             if (!isMatch) {
                 return res.status(401).json({ error: 'Invalid credentials' });
             }
@@ -37,7 +32,7 @@ class AuthController {
                 role: user.role,
                 vendorId: user.vendorId
             };
-            const token = jsonwebtoken_1.default.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+            const token = jsonwebtoken_1.default.sign(payload, config_1.config.jwtSecret, { expiresIn: '7d' });
             await auditService_1.AuditService.log({
                 userId: user.id,
                 actorName: user.name,
@@ -64,10 +59,7 @@ class AuthController {
             if (!req.user) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
-            const user = await prisma_1.default.user.findUnique({
-                where: { id: req.user.id },
-                include: { vendor: true }
-            });
+            const user = await userRepository_1.UserRepository.findById(req.user.id);
             if (!user) {
                 return res.status(404).json({ error: 'User not found' });
             }
@@ -78,7 +70,8 @@ class AuthController {
                     name: user.name,
                     role: user.role,
                     vendorId: user.vendorId,
-                    vendor: user.vendor
+                    vendor: user.vendor,
+                    impersonatorId: req.user?.impersonatorId || null
                 }
             });
         }
@@ -88,22 +81,35 @@ class AuthController {
     }
     static async switchRole(req, res) {
         try {
-            const { targetRole, vendorId } = req.body;
-            let userQuery = { role: targetRole, isActive: true };
-            if (vendorId) {
-                userQuery.vendorId = vendorId;
+            const isAllowed = req.user?.role === 'ADMIN' || !!req.user?.impersonatorId;
+            if (!isAllowed) {
+                return res.status(403).json({ error: 'Forbidden: Only administrators can switch roles' });
             }
-            let user = await prisma_1.default.user.findFirst({
-                where: userQuery,
-                include: { vendor: true }
-            });
-            if (!user) {
-                user = await prisma_1.default.user.findFirst({
-                    where: { role: targetRole },
-                    include: { vendor: true }
+            const adminId = req.user?.impersonatorId || req.user.id;
+            const { targetRole, vendorId } = req.body;
+            if (targetRole === 'ADMIN') {
+                const adminUser = await userRepository_1.UserRepository.findById(adminId);
+                if (!adminUser) {
+                    return res.status(404).json({ error: 'Admin account not found' });
+                }
+                const payload = {
+                    id: adminUser.id,
+                    username: adminUser.username,
+                    name: adminUser.name,
+                    role: adminUser.role,
+                    vendorId: adminUser.vendorId
+                };
+                const token = jsonwebtoken_1.default.sign(payload, config_1.config.jwtSecret, { expiresIn: '7d' });
+                return res.json({
+                    token,
+                    user: {
+                        ...payload,
+                        vendor: adminUser.vendor
+                    }
                 });
             }
-            if (!user) {
+            const user = await userRepository_1.UserRepository.findFirstByRole(targetRole, vendorId);
+            if (!user || !user.isActive) {
                 return res.status(404).json({ error: `No active user found for role ${targetRole}` });
             }
             const payload = {
@@ -111,9 +117,20 @@ class AuthController {
                 username: user.username,
                 name: user.name,
                 role: user.role,
-                vendorId: user.vendorId
+                vendorId: user.vendorId,
+                impersonatorId: adminId
             };
-            const token = jsonwebtoken_1.default.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+            // Impersonation token has a safe 2-hour TTL
+            const token = jsonwebtoken_1.default.sign(payload, config_1.config.jwtSecret, { expiresIn: '2h' });
+            await auditService_1.AuditService.log({
+                userId: adminId,
+                actorName: req.user?.name || 'Admin',
+                role: req.user?.role || client_1.Role.ADMIN,
+                action: 'ROLE_IMPERSONATE',
+                entityType: 'User',
+                entityId: user.id,
+                details: `Administrator switched role to ${targetRole} (impersonating ${user.username})`
+            });
             return res.json({
                 token,
                 user: {
