@@ -61,7 +61,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateToTab })
   const avgTurnaround = exec?.avgTurnaroundDays ?? '2.4 days';
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-5 bg-[#F3F5F7] min-h-screen">
+    <div className="p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-5 bg-[#F3F5F7] min-h-screen">
       {/* 1. Header with Filters (Matching Client Design Page 0) */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
@@ -74,12 +74,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateToTab })
         </div>
 
         {/* 4 Standardized Filter Dropdowns */}
-        <div className="flex items-center gap-2.5 flex-wrap">
+        <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
           <select
             aria-label="Date range"
             value={dateRange}
             onChange={(e) => setDateRange(e.target.value)}
-            className="border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary cursor-pointer shadow-2xs font-medium"
+            className="w-full sm:w-auto border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary cursor-pointer shadow-2xs font-medium"
           >
             <option>Last 90 days</option>
             <option>Last 30 days</option>
@@ -91,7 +91,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateToTab })
             aria-label="Department"
             value={selectedDept}
             onChange={(e) => setSelectedDept(e.target.value)}
-            className="border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary cursor-pointer shadow-2xs font-medium"
+            className="w-full sm:w-auto border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary cursor-pointer shadow-2xs font-medium"
           >
             <option>All departments</option>
             {exec?.topDepartments?.map((d: any) => (
@@ -103,7 +103,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateToTab })
             aria-label="Clinic"
             value={selectedClinic}
             onChange={(e) => setSelectedClinic(e.target.value)}
-            className="border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary cursor-pointer shadow-2xs font-medium"
+            className="w-full sm:w-auto border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary cursor-pointer shadow-2xs font-medium"
           >
             <option>All clinics</option>
             {exec?.clinicPerformance?.map((c: any) => (
@@ -115,7 +115,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateToTab })
             aria-label="Test type"
             value={selectedTestType}
             onChange={(e) => setSelectedTestType(e.target.value)}
-            className="border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary cursor-pointer shadow-2xs font-medium"
+            className="w-full sm:w-auto border border-[#C5CED7] bg-white rounded-lg px-3 py-2 text-[13px] text-[#1B2430] min-h-[44px] focus:outline-none focus:border-secondary cursor-pointer shadow-2xs font-medium"
           >
             <option>All test types</option>
             {metrics?.protocolPackages?.map((p: any) => (
@@ -126,50 +126,50 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateToTab })
       </div>
 
       {/* 2. 5 KPI Summary Cards (Snug & Crisp - 100% Real-time Database Metrics) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-4">
         {/* Card 1: Tests reserved */}
-        <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+        <div className="bg-white border border-[#DDE3E9] rounded-xl p-3.5 sm:p-5 shadow-2xs">
           <div className="text-xs text-[#5A6472] font-medium">Tests reserved</div>
-          <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+          <div className="text-2xl sm:text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
             {totalReserved.toLocaleString()}
           </div>
-          <div className="text-xs text-[#5A6472]">across {clinicCount} clinics</div>
+          <div className="text-[11px] sm:text-xs text-[#5A6472]">across {clinicCount} clinics</div>
         </div>
 
         {/* Card 2: Slot utilization */}
-        <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+        <div className="bg-white border border-[#DDE3E9] rounded-xl p-3.5 sm:p-5 shadow-2xs">
           <div className="text-xs text-[#5A6472] font-medium">Slot utilization</div>
-          <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+          <div className="text-2xl sm:text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
             {slotUtil}
           </div>
-          <div className="text-xs text-[#5A6472]">assigned &divide; reserved</div>
+          <div className="text-[11px] sm:text-xs text-[#5A6472]">assigned &divide; reserved</div>
         </div>
 
         {/* Card 3: Completion */}
-        <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+        <div className="bg-white border border-[#DDE3E9] rounded-xl p-3.5 sm:p-5 shadow-2xs">
           <div className="text-xs text-[#5A6472] font-medium">Completion</div>
-          <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+          <div className="text-2xl sm:text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
             {completionRate}
           </div>
-          <div className="text-xs text-[#5A6472]">of reserved tests</div>
+          <div className="text-[11px] sm:text-xs text-[#5A6472]">of reserved tests</div>
         </div>
 
         {/* Card 4: Results pending (Expertise Warm Amber) */}
-        <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+        <div className="bg-white border border-[#DDE3E9] rounded-xl p-3.5 sm:p-5 shadow-2xs">
           <div className="text-xs text-[#5A6472] font-medium">Results pending</div>
-          <div className="text-[28px] font-bold text-[#B45309] my-1 leading-tight tracking-tight">
+          <div className="text-2xl sm:text-[28px] font-bold text-[#B45309] my-1 leading-tight tracking-tight">
             {pendingCount}
           </div>
-          <div className="text-xs text-[#5A6472]">tested, no result yet</div>
+          <div className="text-[11px] sm:text-xs text-[#5A6472]">tested, no result yet</div>
         </div>
 
         {/* Card 5: No-show rate */}
-        <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+        <div className="bg-white border border-[#DDE3E9] rounded-xl p-3.5 sm:p-5 shadow-2xs col-span-2 sm:col-span-1">
           <div className="text-xs text-[#5A6472] font-medium">No-show rate</div>
-          <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+          <div className="text-2xl sm:text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
             {noShowRate}
           </div>
-          <div className="text-xs text-[#5A6472]">avg. turnaround {avgTurnaround}</div>
+          <div className="text-[11px] sm:text-xs text-[#5A6472]">avg. turnaround {avgTurnaround}</div>
         </div>
       </div>
 

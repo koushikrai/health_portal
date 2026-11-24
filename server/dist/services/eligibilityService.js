@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EligibilityService = void 0;
 const prisma_1 = __importDefault(require("../prisma"));
+const client_1 = require("@prisma/client");
 class EligibilityService {
     static async check(employeeId, testId) {
         const test = await prisma_1.default.medicalTest.findUnique({
@@ -12,6 +13,43 @@ class EligibilityService {
         });
         if (!test) {
             throw new Error(`Invalid medical test ID: ${testId}`);
+        }
+        // 1. Check for active in-flight request for this employee & test
+        const activeRequest = await prisma_1.default.medicalRequest.findFirst({
+            where: {
+                employeeId,
+                testId,
+                status: { in: [client_1.RequestStatus.WAITING, client_1.RequestStatus.SUBMITTED, client_1.RequestStatus.SCHEDULED] }
+            },
+            include: {
+                vendor: true,
+                test: true
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
+        });
+        if (activeRequest) {
+            const clinicName = activeRequest.vendor?.name || 'Pending Clinic Allocation';
+            const statusLabel = activeRequest.status === client_1.RequestStatus.WAITING
+                ? 'Queued for Clinic Allocation'
+                : activeRequest.status === client_1.RequestStatus.SUBMITTED
+                    ? 'Assigned to Clinic'
+                    : 'Appointment Scheduled';
+            return {
+                isEligible: false,
+                status: 'ACTIVE_REQUEST_PENDING',
+                canRequest: false,
+                message: `Active clearance request #${activeRequest.id} is already in progress (${statusLabel} at ${clinicName}). Duplicate request is blocked.`,
+                activeRequest: {
+                    requestId: activeRequest.id,
+                    status: activeRequest.status,
+                    statusLabel,
+                    clinicName,
+                    apptDate: activeRequest.apptDate,
+                    createdAt: activeRequest.createdAt
+                }
+            };
         }
         // Find latest completed report for this employee & test
         const latestReport = await prisma_1.default.medicalReport.findFirst({

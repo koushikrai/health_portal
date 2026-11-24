@@ -1074,7 +1074,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-[1780px] mx-auto space-y-5 bg-[#F3F5F7] min-h-screen">
+    <div className="p-3 sm:p-6 lg:p-8 max-w-[1780px] mx-auto space-y-5 bg-[#F3F5F7] min-h-screen">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-bold flex items-center justify-between shadow-sm animate-fade-in">
@@ -1187,79 +1187,79 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
 
       {/* 2. 4 TOP KPI SUMMARY CARDS */}
       {requestMode === 'standard' ? (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
           {/* Card 1: Active batches */}
-          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-3.5 sm:p-5 shadow-2xs">
             <div className="text-xs text-[#5A6472] font-medium">Active batches</div>
-            <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+            <div className="text-2xl sm:text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
               {telemetry.activeBatches}
             </div>
-            <div className="text-xs text-[#5A6472]">Yanpet, Sadara, SABIC</div>
+            <div className="text-[11px] sm:text-xs text-[#5A6472]">Yanpet, Sadara, SABIC</div>
           </div>
 
           {/* Card 2: Employees requested */}
-          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-3.5 sm:p-5 shadow-2xs">
             <div className="text-xs text-[#5A6472] font-medium">Employees requested</div>
-            <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+            <div className="text-2xl sm:text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
               {telemetry.totalEmployees}
             </div>
-            <div className="text-xs text-[#5A6472]">across {telemetry.departmentsCount} departments</div>
+            <div className="text-[11px] sm:text-xs text-[#5A6472]">across {telemetry.departmentsCount} departments</div>
           </div>
 
           {/* Card 3: Assigned */}
-          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-3.5 sm:p-5 shadow-2xs">
             <div className="text-xs text-[#5A6472] font-medium">Assigned</div>
-            <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
-              {telemetry.assignedTotal} <span className="text-sm font-semibold text-[#5A6472]">({telemetry.assignedPercent}%)</span>
+            <div className="text-2xl sm:text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+              {telemetry.assignedTotal} <span className="text-xs sm:text-sm font-semibold text-[#5A6472]">({telemetry.assignedPercent}%)</span>
             </div>
-            <div className="text-xs text-[#5A6472]">dispatched to clinics</div>
+            <div className="text-[11px] sm:text-xs text-[#5A6472]">dispatched to clinics</div>
           </div>
 
           {/* Card 4: Pending assignment */}
-          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-3.5 sm:p-5 shadow-2xs">
             <div className="text-xs text-[#5A6472] font-medium">Pending assignment</div>
-            <div className="text-[28px] font-bold text-[#B45309] my-1 leading-tight tracking-tight">
+            <div className="text-2xl sm:text-[28px] font-bold text-[#B45309] my-1 leading-tight tracking-tight">
               {telemetry.pendingTotal}
             </div>
-            <div className="text-xs text-[#5A6472]">awaiting clinic selection</div>
+            <div className="text-[11px] sm:text-xs text-[#5A6472]">awaiting clinic selection</div>
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
           {/* Card 1: Pre-booked slot requests */}
-          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-3.5 sm:p-5 shadow-2xs">
             <div className="text-xs text-[#5A6472] font-medium">Booked Slot Requests</div>
-            <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+            <div className="text-2xl sm:text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
               {slotTelemetry.totalSlotRequests}
             </div>
-            <div className="text-xs text-[#5A6472]">Active SR reservations</div>
+            <div className="text-[11px] sm:text-xs text-[#5A6472]">Active SR reservations</div>
           </div>
 
           {/* Card 2: Total quota slots */}
-          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-3.5 sm:p-5 shadow-2xs">
             <div className="text-xs text-[#5A6472] font-medium">Pre-Booked Quota Capacity</div>
-            <div className="text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
+            <div className="text-2xl sm:text-[28px] font-bold text-[#1B2430] my-1 leading-tight tracking-tight">
               {slotTelemetry.totalQuotaSlots}
             </div>
-            <div className="text-xs text-[#5A6472]">{slotTelemetry.totalAllocatedToClinics} split across clinics</div>
+            <div className="text-[11px] sm:text-xs text-[#5A6472]">{slotTelemetry.totalAllocatedToClinics} split across clinics</div>
           </div>
 
           {/* Card 3: Workforce Assigned */}
-          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-3.5 sm:p-5 shadow-2xs">
             <div className="text-xs text-[#5A6472] font-medium">Workforce Assigned</div>
-            <div className="text-[28px] font-bold text-emerald-700 my-1 leading-tight tracking-tight">
-              {slotTelemetry.totalWorkforceAssigned} <span className="text-sm font-semibold text-[#5A6472]">({slotTelemetry.assignedPercent}%)</span>
+            <div className="text-2xl sm:text-[28px] font-bold text-emerald-700 my-1 leading-tight tracking-tight">
+              {slotTelemetry.totalWorkforceAssigned} <span className="text-xs sm:text-sm font-semibold text-[#5A6472]">({slotTelemetry.assignedPercent}%)</span>
             </div>
-            <div className="text-xs text-[#5A6472]">dispatched to booked clinic slots</div>
+            <div className="text-[11px] sm:text-xs text-[#5A6472]">dispatched to booked clinic slots</div>
           </div>
 
           {/* Card 4: Remaining Vacant Slots */}
-          <div className="bg-white border border-[#DDE3E9] rounded-xl p-5 shadow-2xs">
+          <div className="bg-white border border-[#DDE3E9] rounded-xl p-3.5 sm:p-5 shadow-2xs">
             <div className="text-xs text-[#5A6472] font-medium">Vacant Slots Remaining</div>
-            <div className="text-[28px] font-bold text-[#B45309] my-1 leading-tight tracking-tight">
+            <div className="text-2xl sm:text-[28px] font-bold text-[#B45309] my-1 leading-tight tracking-tight">
               {slotTelemetry.vacantSlots}
             </div>
-            <div className="text-xs text-[#5A6472]">ready for employee assignment</div>
+            <div className="text-[11px] sm:text-xs text-[#5A6472]">ready for employee assignment</div>
           </div>
         </div>
       )}
@@ -1268,7 +1268,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
       {requestMode === 'standard' && activeBatch && (
       <div className="flex flex-col lg:flex-row gap-4 items-start w-full">
         {/* LEFT COLUMN: CLEARANCE BATCHES LIST - Compact width so table workspace gets maximum space */}
-        <div className="w-full lg:w-[275px] xl:w-[290px] shrink-0 bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-3.5 flex flex-col h-[780px]">
+        <div className="w-full lg:w-[275px] xl:w-[290px] shrink-0 bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-3.5 flex flex-col h-[340px] lg:h-[780px]">
           {/* Header */}
           <div className="flex items-center justify-between shrink-0 mb-3">
             <div className="flex items-center gap-1.5">
@@ -2268,7 +2268,7 @@ export const RequestsQueueView: React.FC<RequestsQueueViewProps> = ({ userRole =
               </div>
             </div>
 
-            <div ref={slotListScrollRef} className="divide-y divide-slate-100 max-h-[680px] overflow-y-auto">
+            <div ref={slotListScrollRef} className="divide-y divide-slate-100 max-h-[320px] lg:max-h-[680px] overflow-y-auto">
               {filteredSlotQueue.length === 0 ? (
                 <div className="p-6 text-center text-xs text-slate-500 space-y-2">
                   <p className="font-semibold text-slate-700">No booked slot quotas match this filter.</p>

@@ -102,6 +102,15 @@ export class SlotRepository {
     });
   }
 
+  static async cleanZeroAllocationsForSlot(slotRequestId: string) {
+    return prisma.slotAllocation.deleteMany({
+      where: {
+        slotRequestId,
+        allocatedSlots: 0
+      }
+    });
+  }
+
   static async delete(id: string) {
     return prisma.slotRequest.delete({ where: { id } });
   }

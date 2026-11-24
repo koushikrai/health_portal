@@ -235,7 +235,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
   }, [batches, selectedPlantFilter, batchSearchQuery]);
 
   return (
-    <div className="p-4 lg:p-6 max-w-7xl mx-auto space-y-5">
+    <div className="p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-5">
       {/* 1. Module Header & Navigation Pill Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 border-b border-slate-200/80 gap-3">
         <div>
@@ -254,7 +254,7 @@ export const ReportsView: React.FC<ReportsViewProps> = () => {
         </div>
 
         {/* 3-View Switcher Navigation Tabs */}
-        <div className="flex items-center p-1 rounded-xl bg-slate-100 border border-slate-200 text-xs shrink-0 self-start sm:self-auto shadow-2xs">
+        <div className="flex items-center p-1 rounded-xl bg-slate-100 border border-slate-200 text-xs shrink-0 self-start sm:self-auto shadow-2xs overflow-x-auto max-w-full">
           {/* Tab 1: Master Roster */}
           <button
             type="button"

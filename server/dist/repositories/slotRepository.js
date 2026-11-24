@@ -98,6 +98,14 @@ class SlotRepository {
             }
         });
     }
+    static async cleanZeroAllocationsForSlot(slotRequestId) {
+        return prisma_1.default.slotAllocation.deleteMany({
+            where: {
+                slotRequestId,
+                allocatedSlots: 0
+            }
+        });
+    }
     static async delete(id) {
         return prisma_1.default.slotRequest.delete({ where: { id } });
     }

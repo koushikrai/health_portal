@@ -26,32 +26,32 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
   return (
     <>
-      <header className="h-16 bg-white border-b border-slate-200/90 px-3 sm:px-6 flex items-center justify-between shrink-0 select-none sticky top-0 z-30">
+      <header className="h-14 sm:h-16 bg-white border-b border-slate-200/90 px-2.5 sm:px-6 flex items-center justify-between shrink-0 select-none sticky top-0 z-30">
         {/* Left: Mobile Drawer Trigger + Breadcrumb Navigation */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           {onToggleMobileSidebar && (
             <button
               type="button"
               onClick={onToggleMobileSidebar}
-              className="lg:hidden p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer shrink-0"
+              className="lg:hidden p-1.5 sm:p-2 text-slate-800 hover:text-slate-950 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl transition-all cursor-pointer shrink-0 flex items-center justify-center shadow-2xs"
               aria-label="Open navigation sidebar"
             >
-              <span className="material-symbols-outlined text-[22px]">menu</span>
+              <span className="material-symbols-outlined text-[22px] sm:text-[24px]">menu</span>
             </button>
           )}
 
           <div className="flex items-center gap-1.5 sm:gap-2 text-xs font-medium text-slate-500 min-w-0 truncate">
-            <span className="material-symbols-outlined text-[17px] text-slate-400 shrink-0">domain</span>
+            <span className="material-symbols-outlined text-[17px] text-slate-400 shrink-0 hidden sm:inline">domain</span>
             <span className="hidden md:inline truncate">Expertise Healthcare</span>
             <span className="hidden md:inline">/</span>
             <span className="hidden sm:inline truncate">Medical Clearance</span>
             <span className="hidden sm:inline">/</span>
-            <span className="text-secondary font-bold truncate">{currentTabLabel}</span>
+            <span className="text-secondary font-extrabold truncate text-xs sm:text-sm">{currentTabLabel}</span>
           </div>
         </div>
 
         {/* Right Controls */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           {/* Role-Specific Quick Shortcuts */}
           {onNavigateToTab && (
             <div className="hidden md:flex items-center gap-1.5">
@@ -140,10 +140,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             </div>
           )}
 
-          {/* Theme Switcher Button */}
+          {/* Theme Switcher Button (hidden on < sm to guarantee space for hamburger & role) */}
           <button
             onClick={() => setIsThemeModalOpen(true)}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-all cursor-pointer shadow-xs"
+            className="hidden sm:flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-all cursor-pointer shadow-xs"
             title="Change UI Theme"
           >
             <div className="flex items-center -space-x-1">
@@ -155,27 +155,27 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 />
               ))}
             </div>
-            <span className="hidden sm:inline font-bold text-slate-800">{theme.name.split(' ')[0]}</span>
+            <span className="font-bold text-slate-800">{theme.name.split(' ')[0]}</span>
             <span className="material-symbols-outlined text-[16px] text-slate-400">tune</span>
           </button>
 
           {/* Role Quick Selector (Accessible for Admin Testing / Impersonation) */}
           {(userRole === 'ADMIN' || localStorage.getItem('ecc_real_role') === 'ADMIN') && (
-            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1 text-xs text-slate-700 shadow-2xs">
-              <span className="material-symbols-outlined text-[15px] text-secondary">badge</span>
+            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 text-xs text-slate-700 shadow-2xs max-w-[125px] sm:max-w-none">
+              <span className="material-symbols-outlined text-[15px] text-secondary shrink-0">badge</span>
               <span className="font-semibold text-slate-500 hidden sm:inline">Role:</span>
               <select
                 value={userRole}
                 onChange={(e) => onSwitchRole(e.target.value)}
-                className="bg-transparent font-bold text-slate-900 focus:outline-none cursor-pointer text-xs"
+                className="bg-transparent font-bold text-slate-900 focus:outline-none cursor-pointer text-xs max-w-[90px] sm:max-w-none truncate"
                 title="Switch active role perspective (Admin Impersonation)"
               >
-                <option value="ADMIN">System Administrator</option>
-                <option value="CENTRAL">Central Medical Team</option>
-                <option value="HR">HR Coordinator</option>
-                <option value="REQUESTER">HSE Coordinator</option>
-                <option value="CLINIC">Clinic Examination Desk</option>
-                <option value="FINANCE">Finance Controller</option>
+                <option value="ADMIN">Admin</option>
+                <option value="CENTRAL">Central</option>
+                <option value="HR">HR</option>
+                <option value="REQUESTER">HSE</option>
+                <option value="CLINIC">Clinic</option>
+                <option value="FINANCE">Finance</option>
               </select>
               {userRole !== 'ADMIN' && (
                 <span className="hidden lg:inline text-[9.5px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded ml-1">
@@ -186,8 +186,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           )}
 
           {/* User Profile Capsule */}
-          <div className="flex items-center gap-2.5 pl-2 border-l border-slate-200">
-            <div className="h-8 w-8 rounded-full bg-secondary text-white font-bold flex items-center justify-center text-xs shadow-sm">
+          <div className="flex items-center gap-2 pl-1 sm:pl-2 border-l border-slate-200">
+            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-secondary text-white font-bold flex items-center justify-center text-xs shadow-sm shrink-0">
               {userName ? userName[0].toUpperCase() : 'U'}
             </div>
             <div className="hidden xl:block text-left leading-tight">
@@ -200,9 +200,9 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           <button
             onClick={onLogout}
             title="Sign out to Login page"
-            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+            className="p-1 sm:p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
           >
-            <span className="material-symbols-outlined text-[19px]">logout</span>
+            <span className="material-symbols-outlined text-[18px] sm:text-[19px]">logout</span>
           </button>
         </div>
       </header>

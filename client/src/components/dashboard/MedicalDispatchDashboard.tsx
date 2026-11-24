@@ -2022,7 +2022,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
         </div>
 
         {/* Sub-Tab Navigation Bar: 1. Inbound Requests -> 2. Slot Scheduler -> 3. Invoice Clearance -> 4. Test & Lab Entry */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 bg-slate-100/90 p-1.5 rounded-2xl border border-slate-200/80">
+        <div className="flex items-center gap-1.5 overflow-x-auto p-1.5 rounded-2xl border border-slate-200/80 bg-slate-100/90 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:grid lg:grid-cols-4 lg:gap-2">
           {[
             {
               id: 'inbound' as const,
@@ -2059,7 +2059,7 @@ export const MedicalDispatchDashboard: React.FC<MedicalDispatchDashboardProps> =
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveSubTab(tab.id)}
-                className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
+                className={`px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap shrink-0 ${
                   isActive
                     ? 'bg-primary text-white shadow-sm'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'

@@ -291,6 +291,9 @@ export class SlotsController {
         }
       }
 
+      // Remove any 0-slot allocation records so removed clinics do not linger in DB
+      await SlotRepository.cleanZeroAllocationsForSlot(id);
+
       const effectiveStatus = status || (totalAllocated >= slotRequest.requestedSlots ? 'CONFIRMED' : 'ALLOCATED');
 
       const updated = await SlotRepository.update(id, {

@@ -172,7 +172,7 @@ export const RatesView: React.FC = () => {
   const visibleEmployees = filteredEmployees.slice(0, displayLimit);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {toastMsg && (
         <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-between">
           <span>{toastMsg}</span>

@@ -568,7 +568,7 @@ export const IntakeView: React.FC<IntakeViewProps> = ({ userRole = 'HR' }) => {
   const selectedTestObj = tests.find(t => t.id === selectedTestId);
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-5 bg-[#F3F5F7] min-h-screen">
+    <div className="p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-5 bg-[#F3F5F7] min-h-screen">
       {/* 1. Header with 'Reserve slots in advance' Button (Matching Page 1) */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>

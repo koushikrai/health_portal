@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RequestsController = void 0;
 const client_1 = require("@prisma/client");
 const auditService_1 = require("../services/auditService");
+const eligibilityService_1 = require("../services/eligibilityService");
 const requestRepository_1 = require("../repositories/requestRepository");
 const employeeRepository_1 = require("../repositories/employeeRepository");
 const vendorRepository_1 = require("../repositories/vendorRepository");
@@ -29,7 +30,7 @@ class RequestsController {
     }
     static async create(req, res) {
         try {
-            const { employeeId, employeeName, department, testId, needByDate, note, batchId } = req.body;
+            const { employeeId, employeeName, department, testId, needByDate, note, batchId, overrideDuplicate, overrideReason } = req.body;
             if (!employeeId || !testId) {
                 return res.status(400).json({ error: 'employeeId and testId are required' });
             }
@@ -45,6 +46,30 @@ class RequestsController {
             }
             if (!emp)
                 return res.status(404).json({ error: 'Employee not found. Please provide employeeName to create new record.' });
+            // Run eligibility & duplicate validation
+            const eligibility = await eligibilityService_1.EligibilityService.check(emp.id, testId);
+            if (!eligibility.canRequest) {
+                const isAuthorizedRole = ['HR', 'ADMIN'].includes(req.user?.role || '');
+                if (overrideDuplicate && isAuthorizedRole) {
+                    await auditService_1.AuditService.log({
+                        userId: req.user?.id,
+                        actorName: req.user?.name || 'Authorized User',
+                        role: req.user?.role || 'HR',
+                        action: 'OVERRIDE_DUPLICATE_REQUEST',
+                        entityType: 'Employee',
+                        entityId: emp.id,
+                        details: `Authorized duplicate/re-test request for ${emp.name} (${emp.employeeNo}). Reason: ${overrideReason || 'HR/Admin Override'}. Flagged reason: ${eligibility.message}`
+                    });
+                }
+                else {
+                    return res.status(409).json({
+                        error: eligibility.message,
+                        code: 'DUPLICATE_REQUEST_BLOCKED',
+                        eligibility,
+                        requiresOverride: isAuthorizedRole
+                    });
+                }
+            }
             let createdRequest = null;
             let attempts = 0;
             while (!createdRequest && attempts < 5) {
@@ -102,6 +127,8 @@ class RequestsController {
             const effectiveBatchName = batchName || (fileName ? `Upload: ${fileName}` : `Bulk Batch ${batchId}`);
             const createdList = [];
             const skipped = [];
+            const seenInBatch = new Set();
+            const isAuthorizedRole = ['HR', 'ADMIN'].includes(req.user?.role || '');
             let rowIdx = 1;
             for (const item of requests) {
                 const empIdentifier = String(item.employeeNo || item.employeeId || '').trim();
@@ -109,6 +136,14 @@ class RequestsController {
                     skipped.push({ row: rowIdx, employeeNo: '', reason: 'Missing employee number / Iqama ID' });
                     rowIdx++;
                     continue;
+                }
+                // 1. Intra-batch duplicate check
+                if (seenInBatch.has(empIdentifier)) {
+                    if (!item.overrideDuplicate || !isAuthorizedRole) {
+                        skipped.push({ row: rowIdx, employeeNo: empIdentifier, reason: 'Duplicate entry within the same uploaded roster' });
+                        rowIdx++;
+                        continue;
+                    }
                 }
                 let emp = await employeeRepository_1.EmployeeRepository.findByIdOrBadge(empIdentifier);
                 if (!emp && (item.name || item.employeeName)) {
@@ -127,13 +162,25 @@ class RequestsController {
                     rowIdx++;
                     continue;
                 }
+                // 2. Database Eligibility & Active Request check
+                const targetTestId = item.testId || '5004959';
+                const eligibility = await eligibilityService_1.EligibilityService.check(emp.id, targetTestId);
+                if (!eligibility.canRequest) {
+                    if (!item.overrideDuplicate || !isAuthorizedRole) {
+                        skipped.push({ row: rowIdx, employeeNo: empIdentifier, reason: eligibility.message });
+                        rowIdx++;
+                        continue;
+                    }
+                }
+                seenInBatch.add(empIdentifier);
                 const reqId = `${batchId}-${String(createdList.length + 1).padStart(2, '0')}`;
                 const notePayload = JSON.stringify({
                     batchId,
                     batchName: effectiveBatchName,
                     fileName: fileName || null,
                     plant: plant || emp.division || 'Main Complex',
-                    rowNote: item.note || 'Bulk upload request'
+                    rowNote: item.note || 'Bulk upload request',
+                    overridden: !!item.overrideDuplicate
                 });
                 const r = await requestRepository_1.RequestRepository.create({
                     id: reqId,

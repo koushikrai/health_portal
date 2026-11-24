@@ -157,6 +157,8 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
 
   // Dynamic clinic rows per card: { [requestId]: AllocationRow[] }
   const [cardClinicRows, setCardClinicRows] = useState<Record<string, AllocationRow[]>>({});
+  const [justConfirmedId, setJustConfirmedId] = useState<string | null>(null);
+  const [confirmingReqId, setConfirmingReqId] = useState<string | null>(null);
 
   // State for Allocations by Clinic
   const [clinicSummaries, setClinicSummaries] = useState<any[]>([]);
@@ -230,7 +232,10 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
         if (res.data.slotExpiryDays) setSlotExpiryDays(res.data.slotExpiryDays);
         if (res.data.expiredCount !== undefined) setExpiredCount(res.data.expiredCount);
 
-        // Initialize dynamic 4-column layout matching screenshot (Ar Raji, Badr Al Khaleej, Dina, Gulf Asian)
+        // Initialize dynamic clinic layout:
+        // If request already has allocations saved with > 0 slots, ONLY load those allocated clinics!
+        // Never re-add removed/deleted 0-slot clinics.
+        // For new / unallocated requests, initialize with primary 4 clinics as template.
         const initialRowsMap: Record<string, AllocationRow[]> = {};
         const primaryClinicIds = ['V4', 'V1', 'V5', 'V2'];
 
@@ -238,27 +243,46 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
           const allocMap: Record<string, number> = {};
           if (req.allocations) {
             Object.entries(req.allocations).forEach(([vId, val]) => {
-              allocMap[vId] = typeof val === 'number' ? val : 0;
+              if (typeof val === 'number' && val > 0) {
+                allocMap[vId] = val;
+              }
             });
           }
           if (req.activeAllocations) {
             req.activeAllocations.forEach(a => {
-              allocMap[a.vendorId] = a.allocatedSlots;
+              if (a.allocatedSlots > 0) {
+                allocMap[a.vendorId] = a.allocatedSlots;
+              }
             });
           }
 
-          // Build row list starting with the 4 primary clinics
-          const rows: AllocationRow[] = primaryClinicIds.map(vId => ({
-            vendorId: vId,
-            slots: allocMap[vId] || 0
-          }));
+          const hasSavedAllocations = Object.keys(allocMap).length > 0;
 
-          // If there are other clinics with allocations not in primaryClinicIds, append them
-          Object.entries(allocMap).forEach(([vId, slots]) => {
-            if (!primaryClinicIds.includes(vId) && slots > 0) {
-              rows.push({ vendorId: vId, slots });
-            }
-          });
+          let rows: AllocationRow[] = [];
+
+          if (hasSavedAllocations) {
+            // ONLY show clinics that have positive allocations!
+            // Maintain display order (Ar Raji, Badr Al Khaleej, Dina, Gulf Asian, etc.)
+            const allocatedIds = Object.keys(allocMap).sort((a, b) => {
+              const idxA = primaryClinicIds.indexOf(a);
+              const idxB = primaryClinicIds.indexOf(b);
+              if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+              if (idxA !== -1) return -1;
+              if (idxB !== -1) return 1;
+              return a.localeCompare(b);
+            });
+
+            rows = allocatedIds.map(vId => ({
+              vendorId: vId,
+              slots: allocMap[vId] || 0
+            }));
+          } else {
+            // For brand-new unallocated requests, provide primary clinics with 0 slots as starting template
+            rows = primaryClinicIds.map(vId => ({
+              vendorId: vId,
+              slots: 0
+            }));
+          }
 
           initialRowsMap[req.id] = rows;
         });
@@ -445,18 +469,22 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
     }
 
     try {
+      setConfirmingReqId(req.id);
       const res = await api.allocateSlots(req.id, {
         allocations: allocationsMap,
         status: totalAllocated >= req.requestedSlots ? 'CONFIRMED' : 'ALLOCATED'
       });
 
+      setJustConfirmedId(req.id);
       showToast(
-        res.data?.message || `Confirmed allocation for ${req.id} (${totalAllocated} of ${req.requestedSlots} slots). Now ready for employee assignment in Request Queue.`,
+        res.data?.message || `Saved allocation split for ${req.id} (${totalAllocated} of ${req.requestedSlots} slots). Now ready for workforce assignment in Request Queue.`,
         req.id
       );
-      loadQueueData();
+      await loadQueueData();
     } catch (e: any) {
       alert(`Allocation failed: ${e.response?.data?.error || e.message}`);
+    } finally {
+      setConfirmingReqId(null);
     }
   };
 
@@ -536,7 +564,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
   });
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-5 bg-[#F3F5F7] min-h-screen">
+    <div className="p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-5 bg-[#F3F5F7] min-h-screen">
       {/* 1. Header with Title, Queue Counter & Action Buttons */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -812,6 +840,23 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                           <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-[#5A6472] border border-[#DDE3E9]">
                             {req.department}
                           </span>
+                          {/* Allocation Status Badge */}
+                          {isFullyAllocated || req.status === 'CONFIRMED' ? (
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#D8F0E3] text-[#0B5132] border border-[#A3E0C0] flex items-center gap-1 shadow-2xs">
+                              <span className="material-symbols-outlined text-[13px]">check_circle</span>
+                              Allocated ({currentAllocated}/{req.requestedSlots})
+                            </span>
+                          ) : currentAllocated > 0 ? (
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#FDECD6] text-[#7A3A05] border border-[#FCD2A4] flex items-center gap-1">
+                              <span className="material-symbols-outlined text-[13px]">timelapse</span>
+                              Partial ({currentAllocated}/{req.requestedSlots})
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1">
+                              <span className="material-symbols-outlined text-[13px]">hourglass_empty</span>
+                              Needs Allocation
+                            </span>
+                          )}
                           {req.daysRemaining !== undefined && (
                             <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[#FDECD6] text-[#7A3A05]">
                               Disappears in {req.daysRemaining}d
@@ -822,11 +867,17 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
 
                       {/* Right: Slots summary + Selection Toggle Button */}
                       <div className="flex items-center gap-3 flex-wrap justify-between md:justify-end">
-                        <div className="text-xs text-[#5A6472] font-medium">
-                          <span>{req.requestedSlots} slots requested</span>
-                          <span className="mx-1.5">&bull;</span>
-                          <span>{req.assignedSlots || 0}/{req.requestedSlots} assigned</span>
-                          <span className="mx-1.5">&bull;</span>
+                        <div className="text-xs text-[#5A6472] font-medium flex items-center gap-1.5 flex-wrap">
+                          <span><b className="text-[#1B2430]">{req.requestedSlots}</b> requested</span>
+                          <span>&bull;</span>
+                          <span className={isFullyAllocated || req.status === 'CONFIRMED' ? 'text-emerald-700 font-bold' : ''}>
+                            <b>{currentAllocated}</b>/{req.requestedSlots} allocated
+                          </span>
+                          <span>&bull;</span>
+                          <span>
+                            <b className="text-[#1B2430]">{req.assignedSlots || 0}</b>/{req.requestedSlots} workforce assigned
+                          </span>
+                          <span>&bull;</span>
                           <span>
                             Need-by{' '}
                             {req.needByDate
@@ -847,7 +898,13 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                               : 'bg-white border border-[#DDE3E9] text-[#1B2430] hover:bg-slate-100'
                           }`}
                         >
-                          <span>{isExpanded ? 'Hide Allocation' : 'Select & Allocate'}</span>
+                          <span>
+                            {isExpanded
+                              ? 'Hide Allocation'
+                              : isFullyAllocated || req.status === 'CONFIRMED'
+                              ? 'Edit Allocation'
+                              : 'Select & Allocate'}
+                          </span>
                           <span
                             className={`material-symbols-outlined text-[15px] transition-transform duration-200 ${
                               isExpanded ? 'rotate-180' : ''
@@ -862,6 +919,21 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                     {/* Dropdown Section: Clinic Allocation Inputs Grid (Matching Image 1) */}
                     {isExpanded && (
                       <div className="border-t border-[#EEF1F4] bg-[#FAFBFD] p-5 space-y-4 animate-in fade-in-50 duration-150">
+                        {/* Confirmed / Saved Allocation Banner */}
+                        {(isFullyAllocated || req.status === 'CONFIRMED') && (
+                          <div className="bg-[#D8F0E3]/70 border border-[#A3E0C0] text-[#0B5132] px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 shadow-2xs">
+                            <div className="flex items-center gap-2">
+                              <span className="material-symbols-outlined text-[18px] text-[#0B5132]">verified</span>
+                              <span>
+                                <b>Allocation Confirmed & Saved:</b> All {req.requestedSlots} slots distributed across {currentRows.length} clinic{currentRows.length > 1 ? 's' : ''}. Saved to database.
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-bold uppercase tracking-wider bg-white/90 text-[#0B5132] px-2 py-0.5 rounded border border-[#A3E0C0]">
+                              Saved ✓
+                            </span>
+                          </div>
+                        )}
+
                         {/* Clinic Input Grid */}
                         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3 pt-1">
                           {currentRows.map((row, colIndex) => {
@@ -891,7 +963,7 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                                   >
                                     All {req.requestedSlots} here
                                   </button>
-                                  {currentRows.length > 2 && (
+                                  {currentRows.length > 1 && (
                                     <button
                                       type="button"
                                       onClick={() => handleRemoveClinicRow(req.id, colIndex)}
@@ -949,7 +1021,11 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
                               onClick={() =>
                                 navigate(`/requests?mode=slots&slotId=${encodeURIComponent(req.id)}`)
                               }
-                              className="px-3.5 py-2 bg-orange-50 hover:bg-orange-100 text-orange-800 border border-orange-200 rounded-xl text-xs font-bold transition-all min-h-[40px] cursor-pointer flex items-center gap-1.5"
+                              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] cursor-pointer flex items-center gap-1.5 ${
+                                isFullyAllocated || req.status === 'CONFIRMED'
+                                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-2xs font-extrabold'
+                                  : 'bg-orange-50 hover:bg-orange-100 text-orange-800 border border-orange-200'
+                              }`}
                               title="Open this booked slot in Request Queue to assign employees"
                             >
                               <span className="material-symbols-outlined text-[16px]">group_add</span>
@@ -960,15 +1036,33 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
 
                             <button
                               type="button"
-                              disabled={isOverAllocated}
+                              disabled={isOverAllocated || confirmingReqId === req.id}
                               onClick={() => handleConfirmAllocation(req)}
-                              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] shadow-xs cursor-pointer ${
+                              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] shadow-xs cursor-pointer flex items-center gap-1.5 ${
                                 isOverAllocated
                                   ? 'bg-[#E6EBF0] text-[#5A6472] cursor-not-allowed opacity-60'
+                                  : justConfirmedId === req.id
+                                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                                   : 'bg-secondary hover:bg-secondary-hover text-white'
                               }`}
                             >
-                              {isOverAllocated ? 'Quota Exceeded' : 'Confirm allocation'}
+                              {confirmingReqId === req.id ? (
+                                <>
+                                  <span className="material-symbols-outlined text-[15px] animate-spin">progress_activity</span>
+                                  <span>Saving...</span>
+                                </>
+                              ) : justConfirmedId === req.id ? (
+                                <>
+                                  <span className="material-symbols-outlined text-[15px]">check</span>
+                                  <span>Saved to Database!</span>
+                                </>
+                              ) : isOverAllocated ? (
+                                'Quota Exceeded'
+                              ) : isFullyAllocated || req.status === 'CONFIRMED' ? (
+                                'Update allocation'
+                              ) : (
+                                'Confirm allocation'
+                              )}
                             </button>
                           </div>
                         </div>

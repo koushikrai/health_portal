@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SlotsController = void 0;
 const auditService_1 = require("../services/auditService");
+const eligibilityService_1 = require("../services/eligibilityService");
 const settingsService_1 = require("../services/settingsService");
 const slotRepository_1 = require("../repositories/slotRepository");
 const vendorRepository_1 = require("../repositories/vendorRepository");
@@ -261,15 +262,25 @@ class SlotsController {
                 return res.status(404).json({ error: `Slot request ${id} not found` });
             }
             let totalAllocated = 0;
+            for (const [vendorId, countRaw] of Object.entries(allocations)) {
+                const count = Math.max(0, parseInt(String(countRaw), 10) || 0);
+                totalAllocated += count;
+            }
+            if (totalAllocated > slotRequest.requestedSlots) {
+                return res.status(400).json({
+                    error: `Total allocated slots (${totalAllocated}) cannot exceed requested quota (${slotRequest.requestedSlots}). Please adjust clinic allocations.`
+                });
+            }
             // Reset existing allocations for this request to 0 so new clinic choices take full effect
             await slotRepository_1.SlotRepository.resetAllocationsForSlot(id);
             for (const [vendorId, countRaw] of Object.entries(allocations)) {
                 const count = Math.max(0, parseInt(String(countRaw), 10) || 0);
                 if (count > 0) {
-                    totalAllocated += count;
                     await slotRepository_1.SlotRepository.upsertAllocation(id, vendorId, count);
                 }
             }
+            // Remove any 0-slot allocation records so removed clinics do not linger in DB
+            await slotRepository_1.SlotRepository.cleanZeroAllocationsForSlot(id);
             const effectiveStatus = status || (totalAllocated >= slotRequest.requestedSlots ? 'CONFIRMED' : 'ALLOCATED');
             const updated = await slotRepository_1.SlotRepository.update(id, {
                 allocatedSlots: totalAllocated,
@@ -545,9 +556,26 @@ class SlotsController {
             if (alreadyAssigned) {
                 return res.status(400).json({ error: `Employee ${emp.name} (${emp.employeeNo}) is already assigned to slot ${id}.` });
             }
+            // Check if employee already has active clearance or in-flight request
+            const effectiveTestId = slotRequest.testId || '5004955';
+            const eligibility = await eligibilityService_1.EligibilityService.check(emp.id, effectiveTestId);
+            if (!eligibility.canRequest) {
+                return res.status(409).json({
+                    error: `Cannot assign candidate: ${eligibility.message}`
+                });
+            }
             // Determine vendor
             let targetVendorId = vendorId;
             const activeClinics = slotRequest.allocations.filter(a => a.allocatedSlots > 0);
+            if (targetVendorId && targetVendorId !== 'AUTO') {
+                const clinicAlloc = slotRequest.allocations.find(a => a.vendorId === targetVendorId);
+                const assignedToClinic = existingReqs.filter(r => r.vendorId === targetVendorId).length;
+                if (clinicAlloc && assignedToClinic >= clinicAlloc.allocatedSlots) {
+                    return res.status(400).json({
+                        error: `Clinic quota for ${clinicAlloc.vendor?.name || targetVendorId} is already full (${assignedToClinic}/${clinicAlloc.allocatedSlots}).`
+                    });
+                }
+            }
             if (!targetVendorId || targetVendorId === 'AUTO') {
                 // Find first clinic with available capacity
                 for (const clinic of activeClinics) {
@@ -572,7 +600,6 @@ class SlotsController {
                 assignedAt: new Date().toISOString(),
                 customNote: note || 'Assigned to advance pre-booked quota'
             });
-            const effectiveTestId = slotRequest.testId || '5004955';
             const newRequest = await requestRepository_1.RequestRepository.create({
                 id: reqId,
                 employeeId: emp.id,
@@ -683,6 +710,18 @@ class SlotsController {
                     skippedList.push({ row: i + 1, employeeNo: emp.employeeNo, reason: 'Already assigned to this slot' });
                     continue;
                 }
+                // Check if employee already has active clearance or in-flight request
+                const eligibility = await eligibilityService_1.EligibilityService.check(emp.id, effectiveTestId);
+                if (!eligibility.canRequest) {
+                    skippedList.push({
+                        row: i + 1,
+                        employeeNo: emp.employeeNo,
+                        reason: eligibility.status === 'ACTIVE_REQUEST_PENDING'
+                            ? 'Has pending in-flight request'
+                            : 'Has valid active clearance certificate'
+                    });
+                    continue;
+                }
                 // Determine vendor
                 let assignedVendor = vendorId;
                 if (isAutoDistribute) {
@@ -699,8 +738,29 @@ class SlotsController {
                             }
                         }
                     }
+                    if (maxRemaining <= 0) {
+                        skippedList.push({
+                            row: i + 1,
+                            employeeNo: emp.employeeNo,
+                            reason: 'All clinics have reached their allocated quota'
+                        });
+                        continue;
+                    }
                     assignedVendor = bestClinicId;
                     if (clinicAllocMap[assignedVendor]) {
+                        clinicAllocMap[assignedVendor].assigned++;
+                    }
+                }
+                else {
+                    if (clinicAllocMap[assignedVendor]) {
+                        if (clinicAllocMap[assignedVendor].assigned >= clinicAllocMap[assignedVendor].allocated) {
+                            skippedList.push({
+                                row: i + 1,
+                                employeeNo: emp.employeeNo,
+                                reason: `Clinic ${assignedVendor} has reached its allocated quota limit`
+                            });
+                            continue;
+                        }
                         clinicAllocMap[assignedVendor].assigned++;
                     }
                 }
