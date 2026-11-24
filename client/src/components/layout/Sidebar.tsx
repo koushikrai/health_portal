@@ -15,6 +15,8 @@ interface SidebarProps {
   userName: string;
   onSwitchRole: (role: string, vendorId?: string) => void;
   onLogout: () => void;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -23,7 +25,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   userRole,
   userName,
   onSwitchRole,
-  onLogout
+  onLogout,
+  isOpen = false,
+  onClose
 }) => {
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', allowedRoles: ['HR', 'REQUESTER', 'CENTRAL', 'FINANCE', 'ADMIN'] },
@@ -45,7 +49,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   });
 
   return (
-    <aside className="w-64 bg-[#0A0F1D] text-white flex flex-col justify-between border-r border-slate-800 shrink-0 select-none sticky top-0 h-screen overflow-y-auto z-40">
+    <aside
+      className={`fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-[#0A0F1D] text-white flex flex-col justify-between border-r border-slate-800 shrink-0 select-none h-screen overflow-y-auto transition-transform duration-300 ease-in-out lg:static lg:w-64 lg:translate-x-0 ${
+        isOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:shadow-none'
+      }`}
+    >
       <div>
         {/* Brand Header */}
         <div className="px-5 py-4 flex items-center justify-between border-b border-slate-800/60">
@@ -53,6 +61,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <img src="/expertise-logo-trans.png" alt="Expertise" className="h-6 w-auto object-contain" />
             <span className="bg-secondary text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded tracking-wider uppercase">HEALTH</span>
           </div>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="lg:hidden text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800/60 transition-colors cursor-pointer"
+              aria-label="Close sidebar navigation"
+            >
+              <span className="material-symbols-outlined text-[20px]">close</span>
+            </button>
+          )}
         </div>
 
         {/* Active Facility Card */}
@@ -84,7 +102,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             return (
               <button
                 key={item.id}
-                onClick={() => onSelectTab(item.id)}
+                onClick={() => {
+                  onSelectTab(item.id);
+                  if (onClose) onClose();
+                }}
                 className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
                   isActive
                     ? 'bg-white text-slate-900 font-semibold shadow-sm'

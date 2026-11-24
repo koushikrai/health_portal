@@ -63,6 +63,7 @@ export function App() {
   const [userRole, setUserRole] = useState('HR');
   const [userName, setUserName] = useState('Marcus Sterling');
   const [vendorId, setVendorId] = useState<string | null>(null);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -70,6 +71,18 @@ export function App() {
   // Extract current tab from real browser URL pathname (e.g. "/requests" -> "requests")
   const currentPathSegment = location.pathname.replace(/^\//, '').split('/')[0] || '';
   const currentTab = currentPathSegment || (ROLE_CONFIGS[userRole]?.defaultTab || 'dashboard');
+
+  useEffect(() => {
+    setIsMobileSidebarOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsMobileSidebarOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     checkSession();
@@ -208,7 +221,16 @@ export function App() {
   const isTabAllowed = userRole === 'ADMIN' || allowedTabs.includes(currentTab);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-surface">
+    <div className="flex h-screen overflow-hidden bg-surface relative">
+      {/* Mobile Drawer Backdrop Overlay */}
+      {isMobileSidebarOpen && (
+        <div
+          onClick={() => setIsMobileSidebarOpen(false)}
+          className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-40 lg:hidden transition-opacity duration-200"
+          aria-hidden="true"
+        />
+      )}
+
       {/* Dark Navy Sidebar connected with real browser routes */}
       <Sidebar
         currentTab={currentTab}
@@ -217,6 +239,8 @@ export function App() {
         userName={userName}
         onSwitchRole={handleSwitchRole}
         onLogout={handleLogout}
+        isOpen={isMobileSidebarOpen}
+        onClose={() => setIsMobileSidebarOpen(false)}
       />
 
       {/* Main Content Area */}
@@ -228,6 +252,7 @@ export function App() {
           onSwitchRole={handleSwitchRole}
           onLogout={handleLogout}
           onNavigateToTab={handleSelectTab}
+          onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
         />
 
         <main className="flex-1 overflow-y-auto">

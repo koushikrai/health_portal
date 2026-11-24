@@ -9,6 +9,7 @@ interface TopHeaderProps {
   onSwitchRole: (role: string) => void;
   onLogout: () => void;
   onNavigateToTab?: (tabId: string) => void;
+  onToggleMobileSidebar?: () => void;
 }
 
 export const TopHeader: React.FC<TopHeaderProps> = ({
@@ -17,28 +18,40 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   userName,
   onSwitchRole,
   onLogout,
-  onNavigateToTab
+  onNavigateToTab,
+  onToggleMobileSidebar
 }) => {
   const { theme } = useTheme();
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
 
   return (
     <>
-      <header className="h-16 bg-white border-b border-slate-200/90 px-6 flex items-center justify-between shrink-0 select-none sticky top-0 z-30">
-        {/* Breadcrumb Navigation */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
-            <span className="material-symbols-outlined text-[17px] text-slate-400">domain</span>
-            <span>Expertise Healthcare</span>
-            <span>/</span>
-            <span className="text-slate-700">Medical Clearance</span>
-            <span>/</span>
-            <span className="text-secondary font-bold">{currentTabLabel}</span>
+      <header className="h-16 bg-white border-b border-slate-200/90 px-3 sm:px-6 flex items-center justify-between shrink-0 select-none sticky top-0 z-30">
+        {/* Left: Mobile Drawer Trigger + Breadcrumb Navigation */}
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          {onToggleMobileSidebar && (
+            <button
+              type="button"
+              onClick={onToggleMobileSidebar}
+              className="lg:hidden p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer shrink-0"
+              aria-label="Open navigation sidebar"
+            >
+              <span className="material-symbols-outlined text-[22px]">menu</span>
+            </button>
+          )}
+
+          <div className="flex items-center gap-1.5 sm:gap-2 text-xs font-medium text-slate-500 min-w-0 truncate">
+            <span className="material-symbols-outlined text-[17px] text-slate-400 shrink-0">domain</span>
+            <span className="hidden md:inline truncate">Expertise Healthcare</span>
+            <span className="hidden md:inline">/</span>
+            <span className="hidden sm:inline truncate">Medical Clearance</span>
+            <span className="hidden sm:inline">/</span>
+            <span className="text-secondary font-bold truncate">{currentTabLabel}</span>
           </div>
         </div>
 
         {/* Right Controls */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {/* Role-Specific Quick Shortcuts */}
           {onNavigateToTab && (
             <div className="hidden md:flex items-center gap-1.5">
