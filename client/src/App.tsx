@@ -252,7 +252,7 @@ export function App() {
                 path="/dashboard"
                 element={<DashboardView onNavigateToTab={handleSelectTab} />}
               />
-              <Route path="/intake" element={<IntakeView />} />
+              <Route path="/intake" element={<IntakeView userRole={userRole} />} />
               <Route path="/requests" element={<RequestsQueueView userRole={userRole} />} />
               <Route path="/reports" element={<ReportsView />} />
               <Route path="/slots" element={<SlotPortalView userRole={userRole} userName={userName} onSwitchRole={handleSwitchRole} />} />

@@ -1,10 +1,19 @@
 import prisma from '../prisma';
+import { RequestStatus } from '@prisma/client';
 
 export interface EligibilityResult {
   isEligible: boolean;
-  status: 'NO_PREVIOUS_RECORD' | 'ACTIVE_VALID' | 'EXPIRING_SOON' | 'EXPIRED';
+  status: 'NO_PREVIOUS_RECORD' | 'ACTIVE_VALID' | 'EXPIRING_SOON' | 'EXPIRED' | 'ACTIVE_REQUEST_PENDING';
   canRequest: boolean;
   message: string;
+  activeRequest?: {
+    requestId: string;
+    status: RequestStatus;
+    statusLabel: string;
+    clinicName: string;
+    apptDate: Date | null;
+    createdAt: Date;
+  };
   previousReport?: {
     reportId: string;
     testDate: Date;
@@ -22,6 +31,46 @@ export class EligibilityService {
 
     if (!test) {
       throw new Error(`Invalid medical test ID: ${testId}`);
+    }
+
+    // 1. Check for active in-flight request for this employee & test
+    const activeRequest = await prisma.medicalRequest.findFirst({
+      where: {
+        employeeId,
+        testId,
+        status: { in: [RequestStatus.WAITING, RequestStatus.SUBMITTED, RequestStatus.SCHEDULED] }
+      },
+      include: {
+        vendor: true,
+        test: true
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    if (activeRequest) {
+      const clinicName = activeRequest.vendor?.name || 'Pending Clinic Allocation';
+      const statusLabel = activeRequest.status === RequestStatus.WAITING
+        ? 'Queued for Clinic Allocation'
+        : activeRequest.status === RequestStatus.SUBMITTED
+        ? 'Assigned to Clinic'
+        : 'Appointment Scheduled';
+
+      return {
+        isEligible: false,
+        status: 'ACTIVE_REQUEST_PENDING',
+        canRequest: false,
+        message: `Active clearance request #${activeRequest.id} is already in progress (${statusLabel} at ${clinicName}). Duplicate request is blocked.`,
+        activeRequest: {
+          requestId: activeRequest.id,
+          status: activeRequest.status,
+          statusLabel,
+          clinicName,
+          apptDate: activeRequest.apptDate,
+          createdAt: activeRequest.createdAt
+        }
+      };
     }
 
     // Find latest completed report for this employee & test

@@ -4,7 +4,11 @@ import { api } from '../api/client';
 import { PdfReportViewerModal } from '../components/certificate/PdfReportViewerModal';
 import { SlotAssignmentModal } from '../components/slots/SlotAssignmentModal';
 
-export const IntakeView: React.FC = () => {
+export interface IntakeViewProps {
+  userRole?: string;
+}
+
+export const IntakeView: React.FC<IntakeViewProps> = ({ userRole = 'HR' }) => {
   const [mode, setMode] = useState<'single' | 'bulk' | 'batches' | 'prebook'>('single');
 
   // Slot Assignment Modal State for Pre-Booked Quotas
@@ -38,6 +42,8 @@ export const IntakeView: React.FC = () => {
   const [selectedTestId, setSelectedTestId] = useState('5004955');
   const [clientSite, setClientSite] = useState('Sadara Complex (Jubail)');
   const [eligibility, setEligibility] = useState<any>(null);
+  const [overrideDuplicate, setOverrideDuplicate] = useState(false);
+  const [overrideReason, setOverrideReason] = useState('');
   const [needByDate, setNeedByDate] = useState('');
   const [note, setNote] = useState('Annual gate pass medical clearance renewal');
   const [submitting, setSubmitting] = useState(false);
@@ -164,6 +170,8 @@ export const IntakeView: React.FC = () => {
     setSelectedEmployee(emp);
     setSearchResults([]);
     setSearchQuery(`${emp.name} (${emp.employeeNo})`);
+    setOverrideDuplicate(false);
+    setOverrideReason('');
     checkEligibilityFor(emp.id, selectedTestId);
   };
 
@@ -189,6 +197,8 @@ export const IntakeView: React.FC = () => {
 
   const handleTestChange = (tId: string) => {
     setSelectedTestId(tId);
+    setOverrideDuplicate(false);
+    setOverrideReason('');
     if (selectedEmployee) {
       checkEligibilityFor(selectedEmployee.id, tId);
     }
@@ -198,18 +208,31 @@ export const IntakeView: React.FC = () => {
     e.preventDefault();
     if (!selectedEmployee || !selectedTestId) return;
 
+    if (eligibility && !eligibility.canRequest && (!overrideDuplicate || !overrideReason.trim())) {
+      alert('Please authorize duplicate / retest clearance and provide a justification reason.');
+      return;
+    }
+
     try {
       setSubmitting(true);
       const res = await api.createRequest({
         employeeId: selectedEmployee.id,
         testId: selectedTestId,
         needByDate: needByDate || undefined,
-        note: `[Site: ${clientSite}] ${note}`
+        note: `[Site: ${clientSite}] ${note}`,
+        overrideDuplicate: !!overrideDuplicate,
+        overrideReason: overrideReason.trim()
       });
       setSuccessMessage(`Medical Request #${res.data.request.id} successfully queued for Central Team clinic triage!`);
+      setOverrideDuplicate(false);
+      setOverrideReason('');
       setTimeout(() => setSuccessMessage(''), 9000);
     } catch (e: any) {
-      alert(`Submission failed: ${e.response?.data?.error || e.message}`);
+      if (e.response?.status === 409) {
+        alert(`Duplicate Request Blocked: ${e.response?.data?.error || 'A duplicate request or active clearance exists for this employee.'}`);
+      } else {
+        alert(`Submission failed: ${e.response?.data?.error || e.message}`);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -218,10 +241,20 @@ export const IntakeView: React.FC = () => {
   // ==========================================
   // Excel File Parsing & Bulk Validation
   // ==========================================
+  const toggleRowOverride = (rowId: number) => {
+    setBulkRows(prev => prev.map(r => {
+      if (r.id === rowId) {
+        return { ...r, overrideDuplicate: !r.overrideDuplicate };
+      }
+      return r;
+    }));
+  };
+
   const validateParsedRows = async (rawRows: Array<{ employeeNo: string; testIdOrName: string; needBy: string; rowNote: string }>) => {
     setBulkValidating(true);
     setUploadError('');
     const parsed: any[] = [];
+    const seenInBatch = new Set<string>();
 
     for (let i = 0; i < rawRows.length; i++) {
       const item = rawRows[i];
@@ -237,25 +270,63 @@ export const IntakeView: React.FC = () => {
       let status = 'INVALID_EMP';
       let message = 'Employee not found in HR master';
 
-      if (employeeNo) {
+      if (!employeeNo) {
+        parsed.push({
+          id: i + 1,
+          employeeNo: '',
+          employee: null,
+          test: matchedTest,
+          needBy,
+          note: rowNote,
+          status: 'INVALID_EMP',
+          message: 'Missing employee SAP ID',
+          overrideDuplicate: false
+        });
+        continue;
+      }
+
+      // Check intra-batch duplicate
+      if (seenInBatch.has(employeeNo)) {
         try {
           const res = await api.searchEmployees(employeeNo);
-          if (res.data.employees && res.data.employees.length > 0) {
+          if (res.data?.employees && res.data.employees.length > 0) {
             employee = res.data.employees[0];
-            status = 'READY';
-            message = 'Ready for submission';
-
-            // Check eligibility
-            const eligRes = await api.checkEligibility(employee.id, matchedTest?.id || '5004959');
-            if (eligRes.data?.eligibility && !eligRes.data.eligibility.isEligible) {
-              status = 'DUPLICATE_WARN';
-              message = eligRes.data.eligibility.message;
-            }
           }
-        } catch (e) {
-          status = 'ERROR';
-          message = 'Validation error';
+        } catch (_) {}
+
+        parsed.push({
+          id: i + 1,
+          employeeNo,
+          employee,
+          test: matchedTest,
+          needBy,
+          note: rowNote,
+          status: 'DUPLICATE_WARN',
+          message: 'Duplicate entry within this uploaded batch',
+          overrideDuplicate: false
+        });
+        continue;
+      }
+
+      seenInBatch.add(employeeNo);
+
+      try {
+        const res = await api.searchEmployees(employeeNo);
+        if (res.data.employees && res.data.employees.length > 0) {
+          employee = res.data.employees[0];
+          status = 'READY';
+          message = 'Ready for submission';
+
+          // Check eligibility
+          const eligRes = await api.checkEligibility(employee.id, matchedTest?.id || '5004959');
+          if (eligRes.data?.eligibility && !eligRes.data.eligibility.canRequest) {
+            status = 'DUPLICATE_WARN';
+            message = eligRes.data.eligibility.message;
+          }
         }
+      } catch (e) {
+        status = 'ERROR';
+        message = 'Validation error';
       }
 
       parsed.push({
@@ -266,7 +337,8 @@ export const IntakeView: React.FC = () => {
         needBy,
         note: rowNote,
         status,
-        message
+        message,
+        overrideDuplicate: false
       });
     }
 
@@ -461,9 +533,9 @@ export const IntakeView: React.FC = () => {
   };
 
   const handleSubmitBulk = async () => {
-    const validRows = bulkRows.filter(r => r.status === 'READY' || r.status === 'DUPLICATE_WARN');
+    const validRows = bulkRows.filter(r => r.status === 'READY' || (r.status === 'DUPLICATE_WARN' && r.overrideDuplicate));
     if (validRows.length === 0) {
-      alert('No valid rows ready to submit.');
+      alert('No valid rows ready to submit. Please resolve invalid rows or toggle override for duplicates.');
       return;
     }
 
@@ -473,10 +545,15 @@ export const IntakeView: React.FC = () => {
         employeeNo: r.employee ? r.employee.employeeNo : r.employeeNo,
         testId: r.test ? r.test.id : '5004959',
         needByDate: r.needBy || undefined,
-        note: r.note
+        note: r.note,
+        overrideDuplicate: !!r.overrideDuplicate
       }));
 
-      const res = await api.bulkCreateRequests(payload);
+      const res = await api.bulkCreateRequests({
+        requests: payload,
+        batchName: customBatchName || undefined,
+        plant: clientSite
+      });
       setBulkSuccess(`Successfully uploaded and queued ${res.data.count} medical clearance requests to Central Team!`);
       setBulkRows([]);
       setBulkText('');
@@ -752,18 +829,81 @@ export const IntakeView: React.FC = () => {
               />
             </div>
 
-            {/* Automated Eligibility Banner */}
+            {/* Automated Eligibility Banner & Duplicate Prevention */}
             {eligibility && (
-              <div className="mt-4">
-                {eligibility.isEligible ? (
-                  <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[18px] text-emerald-600">verified</span>
-                    <span><strong>Eligible for Clearance:</strong> {eligibility.message}</span>
+              <div className="mt-4 space-y-3">
+                {eligibility.canRequest ? (
+                  <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-start gap-2.5">
+                    <span className="material-symbols-outlined text-[20px] text-emerald-600 shrink-0">verified</span>
+                    <div>
+                      <strong className="block font-bold">Eligible for Clearance</strong>
+                      <span>{eligibility.message}</span>
+                    </div>
+                  </div>
+                ) : eligibility.status === 'ACTIVE_REQUEST_PENDING' ? (
+                  <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 text-xs text-rose-900 flex items-start gap-2.5 shadow-2xs">
+                    <span className="material-symbols-outlined text-[20px] text-rose-600 shrink-0">pending_actions</span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <strong className="font-bold text-rose-900">Active In-Flight Request Pending</strong>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-200 text-rose-800">
+                          {eligibility.activeRequest?.id || 'In Queue'}
+                        </span>
+                      </div>
+                      <span className="mt-0.5 block text-rose-800">{eligibility.message}</span>
+                    </div>
                   </div>
                 ) : (
-                  <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[18px] text-amber-600">warning</span>
-                    <span><strong>Duplicate Warning:</strong> {eligibility.message}</span>
+                  <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-xs text-amber-900 flex items-start gap-2.5 shadow-2xs">
+                    <span className="material-symbols-outlined text-[20px] text-amber-600 shrink-0">verified_user</span>
+                    <div>
+                      <strong className="font-bold text-amber-900">Valid Active Clearance Certificate Exists</strong>
+                      <span className="mt-0.5 block text-amber-800">{eligibility.message}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* HR/Admin Override Controls when duplicate/in-flight detected */}
+                {!eligibility.canRequest && (
+                  <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2.5">
+                    {['HR', 'ADMIN'].includes(userRole) ? (
+                      <>
+                        <label className="flex items-start gap-2.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={overrideDuplicate}
+                            onChange={(e) => setOverrideDuplicate(e.target.checked)}
+                            className="mt-0.5 rounded border-amber-400 text-amber-600 focus:ring-amber-500 h-4 w-4 cursor-pointer"
+                          />
+                          <div>
+                            <span className="text-xs font-bold text-amber-900 block">Authorize Duplicate / Retest Clearance</span>
+                            <span className="text-[11px] text-amber-800">
+                              HR/Admin Authorization: Proceed with booking despite active duplicate certificate or pending request.
+                            </span>
+                          </div>
+                        </label>
+                        {overrideDuplicate && (
+                          <div className="pt-1">
+                            <label className="block text-[11px] font-bold text-amber-900 mb-1" htmlFor="override-reason-input">
+                              Mandatory Override Justification *
+                            </label>
+                            <input
+                              id="override-reason-input"
+                              type="text"
+                              value={overrideReason}
+                              onChange={(e) => setOverrideReason(e.target.value)}
+                              placeholder="e.g. Turnaround re-test required by Sadara safety protocol"
+                              className="w-full bg-white border border-amber-300 rounded-lg px-3 py-1.5 text-xs text-[#1B2430] focus:outline-none focus:border-amber-500"
+                            />
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-[11px] text-amber-800 flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[16px] text-amber-600">lock</span>
+                        <span>Duplicate requests are blocked by safety policy. Only HR or Administrators can authorize overrides.</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -772,14 +912,26 @@ export const IntakeView: React.FC = () => {
             {/* Footer Row */}
             <div className="mt-5 pt-4 border-t border-[#EEF1F4] flex items-center justify-between flex-wrap gap-3">
               <span className="text-xs text-[#5A6472]">
-                {!selectedEmployee ? 'Select an employee to enable submit' : 'Ready to submit for triage'}
+                {!selectedEmployee
+                  ? 'Select an employee to enable submit'
+                  : !eligibility?.canRequest && !overrideDuplicate
+                  ? 'Submission blocked: Duplicate or active clearance exists'
+                  : !eligibility?.canRequest && overrideDuplicate && !overrideReason.trim()
+                  ? 'Enter override justification to submit'
+                  : 'Ready to submit for triage'}
               </span>
               <button
                 type="button"
-                disabled={submitting || !selectedEmployee}
+                disabled={
+                  submitting ||
+                  !selectedEmployee ||
+                  (!eligibility?.canRequest && (!overrideDuplicate || !overrideReason.trim()))
+                }
                 onClick={handleSubmitSingle}
                 className={`px-5 py-2.5 rounded-lg text-[13px] font-semibold transition-all min-h-[44px] ${
-                  submitting || !selectedEmployee
+                  submitting ||
+                  !selectedEmployee ||
+                  (!eligibility?.canRequest && (!overrideDuplicate || !overrideReason.trim()))
                     ? 'bg-[#E6EBF0] text-[#5A6472] cursor-not-allowed'
                     : 'bg-secondary hover:bg-secondary-hover text-white shadow-xs cursor-pointer'
                 }`}
@@ -1066,22 +1218,33 @@ export const IntakeView: React.FC = () => {
                   <p className="text-xs text-slate-500">Review status before dispatching to Central Team.</p>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
-                    {bulkRows.filter(r => r.status === 'READY').length} Ready
-                  </span>
-                  <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
-                    {bulkRows.filter(r => r.status === 'DUPLICATE_WARN').length} Duplicate Warnings
-                  </span>
-                  <button
-                    type="button"
-                    disabled={bulkSubmitting || bulkRows.filter(r => r.status === 'READY' || r.status === 'DUPLICATE_WARN').length === 0}
-                    onClick={handleSubmitBulk}
-                    className="bg-secondary hover:bg-orange-600 text-white font-bold text-xs px-6 py-2 rounded-xl shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    {bulkSubmitting ? 'Uploading...' : 'Submit Valid Requests'}
-                  </button>
-                </div>
+                {(() => {
+                  const readyCount = bulkRows.filter(r => r.status === 'READY').length;
+                  const dupCount = bulkRows.filter(r => r.status === 'DUPLICATE_WARN').length;
+                  const overrideCount = bulkRows.filter(r => r.status === 'DUPLICATE_WARN' && r.overrideDuplicate).length;
+                  const totalSubmittable = readyCount + overrideCount;
+
+                  return (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                        {readyCount} Ready
+                      </span>
+                      <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
+                        {dupCount} Duplicate Warnings {overrideCount > 0 ? `(${overrideCount} authorized)` : ''}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={bulkSubmitting || totalSubmittable === 0}
+                        onClick={handleSubmitBulk}
+                        className="bg-secondary hover:bg-secondary-hover text-white font-bold text-xs px-5 py-2 rounded-xl shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {bulkSubmitting
+                          ? 'Uploading...'
+                          : `Submit ${totalSubmittable} Requests (${readyCount} Clean${overrideCount > 0 ? `, ${overrideCount} Overridden` : ''})`}
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="overflow-x-auto">
@@ -1095,6 +1258,7 @@ export const IntakeView: React.FC = () => {
                       <th className="py-2.5 px-3">Need-By</th>
                       <th className="py-2.5 px-3">Status</th>
                       <th className="py-2.5 px-3">Eligibility Check</th>
+                      <th className="py-2.5 px-3">Action / Override</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1124,8 +1288,12 @@ export const IntakeView: React.FC = () => {
                             </span>
                           )}
                           {row.status === 'DUPLICATE_WARN' && (
-                            <span className="inline-block px-2 py-0.5 rounded font-bold text-[10px] bg-amber-100 text-amber-800">
-                              Active Cert Exists
+                            <span className={`inline-block px-2 py-0.5 rounded font-bold text-[10px] ${
+                              row.overrideDuplicate
+                                ? 'bg-amber-200 text-amber-900 ring-1 ring-amber-400'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {row.overrideDuplicate ? 'Authorized Retest' : 'Duplicate Warning'}
                             </span>
                           )}
                           {row.status === 'INVALID_EMP' && (
@@ -1133,9 +1301,39 @@ export const IntakeView: React.FC = () => {
                               Invalid ID
                             </span>
                           )}
+                          {row.status === 'ERROR' && (
+                            <span className="inline-block px-2 py-0.5 rounded font-bold text-[10px] bg-red-100 text-red-800">
+                              Error
+                            </span>
+                          )}
                         </td>
                         <td className="py-2.5 px-3 text-[11px] text-slate-500 max-w-xs truncate" title={row.message}>
                           {row.message}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {row.status === 'DUPLICATE_WARN' ? (
+                            ['HR', 'ADMIN'].includes(userRole) ? (
+                              <button
+                                type="button"
+                                onClick={() => toggleRowOverride(row.id)}
+                                className={`px-2.5 py-1 rounded-lg text-[10.5px] font-bold border transition-all cursor-pointer whitespace-nowrap ${
+                                  row.overrideDuplicate
+                                    ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-2xs'
+                                    : 'bg-white hover:bg-amber-50 text-amber-800 border-amber-300'
+                                }`}
+                              >
+                                {row.overrideDuplicate ? 'Override Active (Will Submit)' : 'Click to Override'}
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 font-medium">HR Override Needed</span>
+                            )
+                          ) : row.status === 'READY' ? (
+                            <span className="text-[10.5px] text-emerald-600 font-semibold flex items-center gap-1">
+                              <span className="material-symbols-outlined text-[14px]">check</span> Will Submit
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400">—</span>
+                          )}
                         </td>
                       </tr>
                     ))}

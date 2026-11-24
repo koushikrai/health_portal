@@ -439,6 +439,11 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
       }
     });
 
+    if (totalAllocated > req.requestedSlots) {
+      alert(`Cannot confirm allocation: Total allocated slots (${totalAllocated}) cannot exceed requested quota (${req.requestedSlots}). Please adjust clinic allocations before confirming.`);
+      return;
+    }
+
     try {
       const res = await api.allocateSlots(req.id, {
         allocations: allocationsMap,
@@ -955,10 +960,15 @@ export const SlotPortalView: React.FC<SlotPortalViewProps> = ({
 
                             <button
                               type="button"
+                              disabled={isOverAllocated}
                               onClick={() => handleConfirmAllocation(req)}
-                              className="px-4 py-2 bg-secondary hover:bg-secondary-hover text-white rounded-xl text-xs font-bold transition-all min-h-[40px] shadow-xs cursor-pointer"
+                              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] shadow-xs cursor-pointer ${
+                                isOverAllocated
+                                  ? 'bg-[#E6EBF0] text-[#5A6472] cursor-not-allowed opacity-60'
+                                  : 'bg-secondary hover:bg-secondary-hover text-white'
+                              }`}
                             >
-                              Confirm allocation
+                              {isOverAllocated ? 'Quota Exceeded' : 'Confirm allocation'}
                             </button>
                           </div>
                         </div>

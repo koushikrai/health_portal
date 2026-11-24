@@ -434,6 +434,10 @@ export const SlotAllocationWorkspace: React.FC<SlotAllocationWorkspaceProps> = (
   // Save Clinic Split from Modal
   const handleSaveClinicSplit = async () => {
     const totalAlloc = Object.values(splitDraft).reduce((sum, v) => sum + (Number(v) || 0), 0);
+    if (totalAlloc > requestedSlots) {
+      showFeedback('error', `Cannot allocate ${totalAlloc} slots. Maximum available quota is ${requestedSlots}. Please adjust clinic allocations.`);
+      return;
+    }
     if (totalAlloc !== requestedSlots) {
       if (
         !window.confirm(
@@ -1866,6 +1870,8 @@ export const SlotAllocationWorkspace: React.FC<SlotAllocationWorkspaceProps> = (
                   className={`text-sm font-black font-mono ${
                     Object.values(splitDraft).reduce((sum, v) => sum + (Number(v) || 0), 0) === requestedSlots
                       ? 'text-emerald-600'
+                      : Object.values(splitDraft).reduce((sum, v) => sum + (Number(v) || 0), 0) > requestedSlots
+                      ? 'text-rose-600'
                       : 'text-amber-600'
                   }`}
                 >
@@ -1886,10 +1892,14 @@ export const SlotAllocationWorkspace: React.FC<SlotAllocationWorkspaceProps> = (
               <button
                 type="button"
                 onClick={handleSaveClinicSplit}
-                disabled={savingSplit}
-                className="px-5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs cursor-pointer shadow-sm disabled:opacity-50"
+                disabled={savingSplit || Object.values(splitDraft).reduce((sum, v) => sum + (Number(v) || 0), 0) > requestedSlots}
+                className="px-5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {savingSplit ? 'Saving...' : 'Confirm Clinic Split'}
+                {savingSplit
+                  ? 'Saving...'
+                  : Object.values(splitDraft).reduce((sum, v) => sum + (Number(v) || 0), 0) > requestedSlots
+                  ? 'Quota Exceeded'
+                  : 'Confirm Clinic Split'}
               </button>
             </div>
           </div>

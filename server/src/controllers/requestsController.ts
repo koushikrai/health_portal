@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { RequestStatus } from '@prisma/client';
 import { AuditService } from '../services/auditService';
+import { EligibilityService } from '../services/eligibilityService';
 import { RequestRepository } from '../repositories/requestRepository';
 import { EmployeeRepository } from '../repositories/employeeRepository';
 import { VendorRepository } from '../repositories/vendorRepository';
@@ -31,7 +32,7 @@ export class RequestsController {
 
   static async create(req: Request, res: Response) {
     try {
-      const { employeeId, employeeName, department, testId, needByDate, note, batchId } = req.body;
+      const { employeeId, employeeName, department, testId, needByDate, note, batchId, overrideDuplicate, overrideReason } = req.body;
       if (!employeeId || !testId) {
         return res.status(400).json({ error: 'employeeId and testId are required' });
       }
@@ -49,6 +50,30 @@ export class RequestsController {
       }
 
       if (!emp) return res.status(404).json({ error: 'Employee not found. Please provide employeeName to create new record.' });
+
+      // Run eligibility & duplicate validation
+      const eligibility = await EligibilityService.check(emp.id, testId);
+      if (!eligibility.canRequest) {
+        const isAuthorizedRole = ['HR', 'ADMIN'].includes(req.user?.role || '');
+        if (overrideDuplicate && isAuthorizedRole) {
+          await AuditService.log({
+            userId: req.user?.id,
+            actorName: req.user?.name || 'Authorized User',
+            role: req.user?.role || 'HR',
+            action: 'OVERRIDE_DUPLICATE_REQUEST',
+            entityType: 'Employee',
+            entityId: emp.id,
+            details: `Authorized duplicate/re-test request for ${emp.name} (${emp.employeeNo}). Reason: ${overrideReason || 'HR/Admin Override'}. Flagged reason: ${eligibility.message}`
+          });
+        } else {
+          return res.status(409).json({
+            error: eligibility.message,
+            code: 'DUPLICATE_REQUEST_BLOCKED',
+            eligibility,
+            requiresOverride: isAuthorizedRole
+          });
+        }
+      }
 
       let createdRequest: any = null;
       let attempts = 0;
@@ -111,6 +136,8 @@ export class RequestsController {
 
       const createdList: any[] = [];
       const skipped: Array<{ row: number; employeeNo: string; reason: string }> = [];
+      const seenInBatch = new Set<string>();
+      const isAuthorizedRole = ['HR', 'ADMIN'].includes(req.user?.role || '');
       let rowIdx = 1;
 
       for (const item of requests) {
@@ -119,6 +146,15 @@ export class RequestsController {
           skipped.push({ row: rowIdx, employeeNo: '', reason: 'Missing employee number / Iqama ID' });
           rowIdx++;
           continue;
+        }
+
+        // 1. Intra-batch duplicate check
+        if (seenInBatch.has(empIdentifier)) {
+          if (!item.overrideDuplicate || !isAuthorizedRole) {
+            skipped.push({ row: rowIdx, employeeNo: empIdentifier, reason: 'Duplicate entry within the same uploaded roster' });
+            rowIdx++;
+            continue;
+          }
         }
 
         let emp: any = await EmployeeRepository.findByIdOrBadge(empIdentifier);
@@ -141,13 +177,27 @@ export class RequestsController {
           continue;
         }
 
+        // 2. Database Eligibility & Active Request check
+        const targetTestId = item.testId || '5004959';
+        const eligibility = await EligibilityService.check(emp.id, targetTestId);
+        if (!eligibility.canRequest) {
+          if (!item.overrideDuplicate || !isAuthorizedRole) {
+            skipped.push({ row: rowIdx, employeeNo: empIdentifier, reason: eligibility.message });
+            rowIdx++;
+            continue;
+          }
+        }
+
+        seenInBatch.add(empIdentifier);
+
         const reqId = `${batchId}-${String(createdList.length + 1).padStart(2, '0')}`;
         const notePayload = JSON.stringify({
           batchId,
           batchName: effectiveBatchName,
           fileName: fileName || null,
           plant: plant || emp.division || 'Main Complex',
-          rowNote: item.note || 'Bulk upload request'
+          rowNote: item.note || 'Bulk upload request',
+          overridden: !!item.overrideDuplicate
         });
 
         const r = await RequestRepository.create({
